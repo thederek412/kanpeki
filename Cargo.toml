@@ -1,0 +1,22 @@
+[package]
+name = "kanpeki"
+version = "1.0.0"
+edition = "2021"
+description = "Kanpeki — a fast, multi-window text editor inspired by SaintEdit (1993)"
+license = "MIT"
+
+[[bin]]
+name = "kanpeki"
+path = "src/main.rs"
+
+[dependencies]
+egui-multiwin = "0.5"
+ropey = "1.6"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+
+[profile.release]
+lto = true
+strip = true
