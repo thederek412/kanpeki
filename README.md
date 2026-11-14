@@ -36,6 +36,10 @@ Named for the Japanese word for “perfect”.
 
 *Find & Replace, with the first match selected.*
 
+![File menu](docs/kanpeki-menu.png)
+
+*File menu: shortcuts flush right, with Open Recent aligned.*
+
 ## Build
 
 Requires a stable Rust toolchain.
