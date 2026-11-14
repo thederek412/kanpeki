@@ -24,6 +24,8 @@
 | `src/windows.rs` | **Complete and tested** (TrackedWindow, menus, input/editing/find, drawing, status bar, close prompt) |
 | `src/main.rs` | **Written and building** (code below) |
 | `docs/` | README screenshots (Day, Night, Find & Replace), captured from the release build |
+| `src/icon.rs` | Complete ✔ — embeds the shiba inu icon and decodes it for each window |
+| `assets/` | `kanpeki-icon.png` (128×128, embedded) and `kanpeki-icon-source.jpg` (1024×1024 artwork) |
 | Build | **Clean** — `cargo build` succeeds, 3 benign warnings (unused macro import, unused `Scroll::step/clamp`, unused `Theme::chrome`) |
 
 Already fixed while writing Parts 2–5 (avoid re-introducing these):
@@ -111,6 +113,7 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
+png = "0.17"          # decode the embedded window icon
 
 [profile.release]
 lto = true
@@ -582,6 +585,7 @@ Optional improvements are listed under "Optional polish" above.
 - Find/replace: plain, regex, case-sensitive, whole-word, Replace All as one undo step.
 - Word wrap toggle; font A−/A+; Day/Night persist across restarts.
 - Window menu lists documents; title bar shows `●` when modified.
+- The shiba inu window icon is embedded as a 128×128 PNG. 256×256 **fails**: the `_NET_WM_ICON` property would exceed X11's default maximum request size (262 140 bytes) and winit silently leaves the property empty, so `xprop` shows no icon. 128×128 is (128² + 2) × 4 ≈ 65 KB and works.
 
 ## License
 

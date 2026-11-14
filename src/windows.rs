@@ -176,7 +176,8 @@ impl DocWindow {
             .with_position(egui_multiwin::winit::dpi::PhysicalPosition::new(
                 70 + (seq % 10) * 36,
                 50 + (seq % 10) * 28,
-            ));
+            ))
+            .with_window_icon(crate::icon::app_icon());
         NewWindowRequest::new(
             Windows::Doc(Self::new(doc)),
             builder,

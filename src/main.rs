@@ -5,6 +5,7 @@ mod buffer;
 mod dialogs;
 mod editor;
 mod fileio;
+mod icon;
 mod search;
 mod theme;
 mod windows;

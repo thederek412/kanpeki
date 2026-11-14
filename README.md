@@ -1,5 +1,7 @@
 # Kanpeki
 
+<img src="assets/kanpeki-icon.png" width="96" align="right" alt="Kanpeki shiba inu icon">
+
 A fast, multi-window text editor for the desktop, written in Rust in the spirit
 of the classic System 7 editor **SaintEdit** (Craig Marciniak, 1993).
 
