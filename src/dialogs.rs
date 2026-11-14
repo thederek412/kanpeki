@@ -478,7 +478,8 @@ Deep undo, safe saves, find & replace with regex,
 Day and Night colors, smooth scrolling, and support
 for Unix, DOS and classic Mac line endings.
 
-Built with Rust, egui and ropey.";
+Built with Rust, egui and ropey.
+Set in Hurmit Nerd Font Mono (SIL OFL 1.1).";
     for line in text.lines() {
         ui.label(egui::RichText::new(line).size(13.0));
     }

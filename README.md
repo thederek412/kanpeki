@@ -17,6 +17,7 @@ Named for the Japanese word for “perfect”.
 - Word/line selection, drag-to-select with auto-scroll, grouped undo
 - Unix, DOS and classic-Mac line endings detected and preserved on save
 - Reads UTF-8 (with BOM), UTF-16 and Latin-1; saves as UTF-8
+- Bundled **Hurmit Nerd Font Mono** typeface — no font installation needed
 - Large-file friendly (ropey), with word counting on a worker thread
 - Native file dialogs for Open and Save (zenity), with built-in fallbacks and overwrite confirmation
 - Opens a file named on the command line; remembers the last window size and position
@@ -60,3 +61,7 @@ Inspired by Craig Marciniak’s SaintEdit (1993) — thank you, Craig.
 
 Released into the public domain under the [Unlicense](LICENSE) — do whatever
 you like with it.
+
+The bundled editor typeface, Hurmit Nerd Font Mono (derived from Hermit),
+is distributed under the SIL Open Font License 1.1; see
+[`assets/fonts/HurmitNerdFont-LICENSE.txt`](assets/fonts/HurmitNerdFont-LICENSE.txt).

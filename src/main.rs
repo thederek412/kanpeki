@@ -5,6 +5,7 @@ mod buffer;
 mod dialogs;
 mod editor;
 mod fileio;
+mod fonts;
 mod icon;
 mod search;
 mod theme;
@@ -108,6 +109,8 @@ fn main() {
     });
 
     egui_multiwin_dynamic::multi_window::MultiWindow::start(move |mw, event_loop, _proxy| {
+        // The editor typeface is embedded, so nothing has to be installed.
+        mw.add_font(fonts::FAMILY.to_string(), fonts::bundled());
         let doc = initial.unwrap_or_else(buffer::Doc::blank);
         let req = windows::DocWindow::request(doc, &mut common);
         if let Err(e) = mw.add(req, &mut common, event_loop) {

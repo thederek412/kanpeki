@@ -25,7 +25,8 @@
 | `src/main.rs` | **Written and building** (code below) |
 | `docs/` | README screenshots (Day, Night, Find & Replace), captured from the release build |
 | `src/icon.rs` | Complete ✔ — embeds the shiba inu icon and decodes it for each window |
-| `assets/` | `kanpeki-icon.png` (128×128, embedded) and `kanpeki-icon-source.jpg` (1024×1024 artwork) |
+| `src/fonts.rs` | Complete ✔ — embeds Hurmit Nerd Font Mono and registers it as `kanpeki-mono` |
+| `assets/` | Icons, plus `fonts/HurmitNerdFontMono-Regular.otf` (SIL OFL) and its license |
 | Build | **Clean** — `cargo build` succeeds, 3 benign warnings (unused macro import, unused `Scroll::step/clamp`, unused `Theme::chrome`) |
 
 Already fixed while writing Parts 2–5 (avoid re-introducing these):
@@ -158,7 +159,18 @@ fileio.rs    — decode (UTF-8/BOM/UTF-16/Latin-1), EOL detect, atomic save, dir
 search.rs    — Search settings + find_all / find_next (plain, regex, case, whole word)
 dialogs.rs   — in-window modal dialogs: Open, Save, Find, Color, About → Action
 theme.rs     — Settings (persisted), Theme palettes (Day/Night), egui visuals
+fonts.rs     — bundled Hurmit Nerd Font Mono, registered under the `kanpeki-mono` family
 ```
+
+### Editor typeface
+
+The editor does not depend on any font being installed. `fonts::bundled()`
+`include_bytes!`s `assets/fonts/HurmitNerdFontMono-Regular.otf` into the binary;
+`main` registers it with `mw.add_font(fonts::FAMILY, …)` **before** adding the
+first window, and `windows.rs` builds the editor `FontId` with
+`FontFamily::Name("kanpeki-mono")`. The status bar shows the face name. The
+font is SIL OFL 1.1 (Hermit by Pablo Caro, Nerd-Fonts patched); the license
+travels in `assets/fonts/`.
 
 ### Data-flow decisions (already locked in)
 

@@ -14,6 +14,7 @@ use crate::buffer::Doc;
 use crate::dialogs::{self, Action, Dialog};
 use crate::editor::{self, Scroll, Selection};
 use crate::fileio;
+use crate::fonts;
 use crate::{AppCommon, CustomEvent, Windows};
 use crate::search::Search;
 use crate::theme::{Theme, ThemeMode};
@@ -652,7 +653,10 @@ impl TrackedWindow for DocWindow {
             });
 
         // --- Editor.
-        let font_id = FontId::new(c.settings.font_size, FontFamily::Monospace);
+        let font_id = FontId::new(
+            c.settings.font_size,
+            FontFamily::Name(fonts::FAMILY.into()),
+        );
         let (row_h, glyph_w) = ctx.fonts(|f| (f.row_height(&font_id), f.glyph_width(&font_id, 'x')));
         let wrap = c.settings.wrap;
         let font_size = c.settings.font_size;
@@ -1993,7 +1997,12 @@ impl DocWindow {
                 );
                 ui.add_space(6.0);
                 ui.label(
-                    egui::RichText::new(format!("{:.0} pt", c.settings.font_size)).weak(),
+                    egui::RichText::new(format!(
+                        "{:.0} pt · {}",
+                        c.settings.font_size,
+                        fonts::LABEL
+                    ))
+                    .weak(),
                 );
             });
         });
