@@ -71,9 +71,12 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 ### Polish added after 1.0.0
 
 - **Menu shortcuts flush right.** Drop-down rows are custom `menu_item` rows
-  (`MENU_W = 250`): the label sits left, the shortcut right, and disabled rows
-  are weak/inert. Native `ui.button`s remain for the Open Recent submenu and
-  the checkboxes in View.
+  (`MENU_W = 250`, `MENU_ROW_H = 21`): the label sits left, the shortcut right,
+  and disabled rows are weak/inert. Native `ui.button`s remain for the Open
+  Recent submenu and the checkboxes in View. The native Open Recent row is
+  aligned by temporarily setting `button_padding = (10, 0)` and
+  `interact_size.y = MENU_ROW_H` around it, and custom hover fills use the
+  same expansion/rounding as egui's native menu buttons.
 - **Scrollbars read at a glance.** The thumb is drawn in `theme.accent`
   (dimmed to 60% until hovered/dragged). The old neutral `theme.border` thumb
   was almost the same value as the track in both palettes.

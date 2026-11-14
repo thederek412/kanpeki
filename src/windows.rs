@@ -148,10 +148,13 @@ fn short_name(p: &str) -> String {
 /// Width every drop-down menu is laid out to, so the shortcut column lines up.
 const MENU_W: f32 = 250.0;
 
+/// Height of every drop-down menu row, native submenus included.
+const MENU_ROW_H: f32 = 21.0;
+
 /// A menu row: the label on the left and its keyboard shortcut flush right,
 /// the way a classic menu bar reads. Returns true when the row was clicked.
 fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
-    let row_h = ui.spacing().interact_size.y.max(21.0);
+    let row_h = ui.spacing().interact_size.y.max(MENU_ROW_H);
     let width = ui.available_width().max(MENU_W);
     let sense = if enabled {
         egui::Sense::click()
@@ -163,9 +166,11 @@ fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str, enabled: bool) -> b
     if ui.is_rect_visible(rect) {
         let hovered = enabled && response.hovered();
         if hovered {
-            let fill = ui.visuals().widgets.hovered.weak_bg_fill;
+            // Match egui's own menu-button highlight (expansion and rounding),
+            // so custom rows and the native Open Recent row look identical.
+            let h = ui.visuals().widgets.hovered;
             ui.painter()
-                .rect_filled(rect.shrink2(egui::vec2(3.0, 1.0)), 3.0, fill);
+                .rect_filled(rect.expand(h.expansion), h.rounding, h.weak_bg_fill);
         }
         let font = egui::TextStyle::Button.resolve(ui.style());
         let text_color = if enabled {
@@ -755,6 +760,13 @@ impl DocWindow {
             ui.close_menu();
         }
 
+        // The native submenu button measures its label and arrow from
+        // `button_padding`; match the custom rows' 10 px inset and height so
+        // "Open Recent" lines up with the labels and shortcut column.
+        let old_padding = ui.spacing().button_padding;
+        let old_interact = ui.spacing().interact_size;
+        ui.spacing_mut().button_padding = egui::vec2(10.0, 0.0);
+        ui.spacing_mut().interact_size.y = MENU_ROW_H;
         let recents = c.settings.recents.clone();
         ui.menu_button("Open Recent", |ui| {
             if recents.is_empty() {
@@ -772,6 +784,8 @@ impl DocWindow {
                 }
             }
         });
+        ui.spacing_mut().button_padding = old_padding;
+        ui.spacing_mut().interact_size = old_interact;
 
         ui.separator();
         if menu_item(ui, "Close", "Ctrl+W", true) {
