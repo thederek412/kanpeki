@@ -828,11 +828,11 @@ impl DocWindow {
         ui.separator();
         let has_sel = !self.sel.is_empty();
         if menu_item(ui, "Cut", "Ctrl+X", has_sel) {
-            self.do_cut(clipboard);
+            self.do_cut(ui.ctx(), clipboard);
             ui.close_menu();
         }
         if menu_item(ui, "Copy", "Ctrl+C", has_sel) {
-            self.do_copy(clipboard);
+            self.do_copy(ui.ctx(), clipboard);
             ui.close_menu();
         }
         if menu_item(ui, "Paste", "Ctrl+V", true) {
@@ -1141,6 +1141,22 @@ impl DocWindow {
         let events: Vec<egui::Event> = ctx.input(|i| i.events.iter().cloned().collect());
         for ev in events {
             match ev {
+                egui::Event::Copy => {
+                    self.do_copy(ctx, clipboard);
+                    break;
+                }
+                egui::Event::Cut => {
+                    self.do_cut(ctx, clipboard);
+                    break;
+                }
+                egui::Event::Paste(s) => {
+                    if !s.is_empty() {
+                        self.paste_text(&s);
+                    } else {
+                        self.paste_from(clipboard);
+                    }
+                    break;
+                }
                 egui::Event::Text(s) => {
                     if !s.is_empty() {
                         let clean = s.replace("\r\n", "\n").replace('\r', "\n");
@@ -1155,7 +1171,7 @@ impl DocWindow {
                 } => {
                     let cmd = modifiers.ctrl || modifiers.command;
                     let handled = if cmd {
-                        self.key_shortcut(key, modifiers.shift, c, clipboard, rr)
+                        self.key_shortcut(key, modifiers.shift, c, ctx, clipboard, rr)
                     } else {
                         self.key_plain(key, modifiers.shift, rect.height(), row_h)
                     };
@@ -1213,6 +1229,7 @@ impl DocWindow {
         key: Key,
         shift: bool,
         c: &mut AppCommon,
+        ctx: &egui::Context,
         clipboard: &mut arboard::Clipboard,
         rr: &mut RedrawResponse,
     ) -> bool {
@@ -1285,11 +1302,11 @@ impl DocWindow {
                 true
             }
             (Key::X, _) => {
-                self.do_cut(clipboard);
+                self.do_cut(ctx, clipboard);
                 true
             }
             (Key::C, _) => {
-                self.do_copy(clipboard);
+                self.do_copy(ctx, clipboard);
                 true
             }
             (Key::V, _) => {
@@ -1504,19 +1521,21 @@ impl DocWindow {
     }
 
     /// Copy the selection to the clipboard.
-    fn do_copy(&mut self, clipboard: &mut arboard::Clipboard) {
+    fn do_copy(&mut self, ctx: &egui::Context, clipboard: &mut arboard::Clipboard) {
         if let Some(t) = self.selection_text() {
             let n = t.chars().count();
-            let _ = clipboard.set_text(t);
+            let _ = clipboard.set_text(t.clone());
+            ctx.output_mut(|o| o.copied_text = t);
             self.note = Some(format!("Copied {n} characters."));
         }
     }
 
     /// Cut the selection.
-    fn do_cut(&mut self, clipboard: &mut arboard::Clipboard) {
+    fn do_cut(&mut self, ctx: &egui::Context, clipboard: &mut arboard::Clipboard) {
         if let Some(t) = self.selection_text() {
             let n = t.chars().count();
-            let _ = clipboard.set_text(t);
+            let _ = clipboard.set_text(t.clone());
+            ctx.output_mut(|o| o.copied_text = t);
             self.find_target = None;
             let (a, b) = self.sel.range();
             self.doc.delete(a, b);
@@ -1526,15 +1545,20 @@ impl DocWindow {
         }
     }
 
+    /// Paste a string directly into the document at the caret.
+    fn paste_text(&mut self, text: &str) {
+        let clean = text.replace("\r\n", "\n").replace('\r', "\n");
+        if !clean.is_empty() {
+            let n = clean.chars().count();
+            self.edit_insert(&clean);
+            self.note = Some(format!("Pasted {n} characters."));
+        }
+    }
+
     /// Paste the clipboard at the caret.
     fn paste_from(&mut self, clipboard: &mut arboard::Clipboard) {
         if let Ok(t) = clipboard.get_text() {
-            let clean = t.replace("\r\n", "\n").replace('\r', "\n");
-            if !clean.is_empty() {
-                let n = clean.chars().count();
-                self.edit_insert(&clean);
-                self.note = Some(format!("Pasted {n} characters."));
-            }
+            self.paste_text(&t);
         }
     }
 

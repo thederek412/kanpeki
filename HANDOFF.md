@@ -98,6 +98,13 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - **Window geometry is remembered** across runs (`window_size` / `window_pos`
   in settings.json). It is written once the window has been still for 0.75 s,
   and again on close, so dragging does not hammer the settings file.
+- **Clipboard shortcuts (Ctrl+C, Ctrl+X, Ctrl+V).** `egui-winit` intercepts
+  copy/cut/paste commands before emitting `Event::Key` and converts them into
+  `Event::Copy`, `Event::Cut`, and `Event::Paste(String)`. `windows.rs` now
+  handles these events directly (synchronizing both `arboard` and egui's
+  `platform_output.copied_text`), and `Cargo.toml` activates the `clipboard`
+  feature on `egui-winit` so its internal paste detector accesses the OS
+  clipboard via `arboard`.
 
 Note (egui 0.27): `button_double_clicked` / `button_triple_clicked` are true on
 **release**, not on press. Kanpeki applies word/line selection on the release
