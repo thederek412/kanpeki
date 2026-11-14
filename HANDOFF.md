@@ -582,3 +582,7 @@ Optional improvements are listed under "Optional polish" above.
 - Find/replace: plain, regex, case-sensitive, whole-word, Replace All as one undo step.
 - Word wrap toggle; font A−/A+; Day/Night persist across restarts.
 - Window menu lists documents; title bar shows `●` when modified.
+
+## License
+
+Released into the public domain under the Unlicense; see `LICENSE`.

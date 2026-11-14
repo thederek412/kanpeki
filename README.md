@@ -51,3 +51,8 @@ API details that shaped the build.
 
 Created by Derek Kalinosky.
 Inspired by Craig Marciniak’s SaintEdit (1993) — thank you, Craig.
+
+## License
+
+Released into the public domain under the [Unlicense](LICENSE) — do whatever
+you like with it.

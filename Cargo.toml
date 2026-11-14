@@ -3,7 +3,8 @@ name = "kanpeki"
 version = "1.0.0"
 edition = "2021"
 description = "Kanpeki — a fast, multi-window text editor inspired by SaintEdit (1993)"
-license = "MIT"
+license = "Unlicense"
+repository = "https://github.com/thederek412/kanpeki"
 
 [[bin]]
 name = "kanpeki"
