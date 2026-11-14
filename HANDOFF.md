@@ -41,7 +41,7 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - Typing, caret, click/drag selection, double-click word select; status bar Ln/Col, bytes, words, EOL, encoding, notes.
 - Save (atomic), Save As with full paths, recents; title/status update after save.
 - Undo/redo (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y), find & replace (Next/Previous/Replace/Replace All with messages).
-- Word wrap (reflows long lines) and Day/Night palettes (persisted in `settings.json`).
+- Word wrap (reflows long lines) and Day/Night palettes (persisted in `settings.json`). The palettes are a duotone: Day is night ink (`#32364a`) on day paper (`#9399b7`); Night is day paper on night ink. Night's selection inverts the pair (paper band, ink text).
 - EOL round-trips: CRLF file stayed CRLF, classic-Mac CR stayed CR, UTF-8 BOM preserved; each detected correctly.
 - 8.96 MB file: opens in about a second, wheel scrolling with inertia, typing stays instant (word count off-thread).
 - Unsaved-changes prompt on Ctrl+W / File > Close; Cancel / Don't Save / Save; app exits when the last window closes.
@@ -261,7 +261,9 @@ impl Settings { pub fn load() -> Self; pub fn save(&self); pub fn add_recent(&mu
 #[derive(Clone, Copy)]
 pub struct Theme {
     pub mode: ThemeMode,
-    pub chrome, menu_bar, menu_fg, text_bg, text_fg, selection, accent,
+    pub chrome, menu_bar, menu_fg, text_bg, text_fg, accent,
+    pub selection, selection_fg, widget_selection,
+    pub gutter_fg, hint_fg, caption_fg,
     pub current_line, status_bg, dialog_bg, border, widget_fill, widget_hover: egui::Color32,
 }
 impl Theme { pub fn resolve(settings: &Settings) -> Self; pub fn egui_visuals(&self) -> egui::Visuals; }
@@ -401,7 +403,10 @@ fn redraw(&mut self, c: &mut AppCommon, egui: &mut EguiGlow, window: &Window,
 - `draw_editor(ui, theme, &font_id, row_h, glyph_w, rect, wrap, font_size)`:
   clip to `rect`; `ensure_map`; compute visible visual lines from `scroll.offset`;
   current-line highlight (`theme.current_line`), selection rects (`theme.selection`), text via
-  `painter.text(pos, Align2::LEFT_CENTER, chunk, font_id.clone(), theme.text_fg)`, solid caret
+  `painter.text(pos, Align2::LEFT_CENTER, chunk, font_id.clone(), theme.text_fg)`; when
+  `selection_fg != text_fg` the selected run is repainted with `painter.with_clip_rect(sel_rect)`
+  in `theme.selection_fg` (the Night inverse; glyph positions are identical because the whole
+  line is drawn twice at the same x). Gutters use `theme.gutter_fg`, solid caret
   (1.5 px `theme.accent` bar at the caret cell — **no blink**: egui-multiwin installs no repaint callback and delayed redraws aren't possible).
 - `status_bar`: `●` + name; `Ln l, Col c` (1-based); `{} bytes · {} words`; EOL label; encoding label; `note`; right-aligned wrap indicator.
   Drain `words_rx` each frame (`try_recv`, keep result only if `gen == doc.edits`); call `count_words()` lazily.

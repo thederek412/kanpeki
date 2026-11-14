@@ -95,6 +95,16 @@ pub struct Theme {
     pub text_bg: egui::Color32,
     pub text_fg: egui::Color32,
     pub selection: egui::Color32,
+    /// Text colour used on top of the selection.
+    pub selection_fg: egui::Color32,
+    /// Selection colour for egui widgets (text fields, menus).
+    pub widget_selection: egui::Color32,
+    /// Line-number colour.
+    pub gutter_fg: egui::Color32,
+    /// Hint text inside fields.
+    pub hint_fg: egui::Color32,
+    /// Small uppercase captions.
+    pub caption_fg: egui::Color32,
     pub accent: egui::Color32,
     pub current_line: egui::Color32,
     pub status_bg: egui::Color32,
@@ -117,18 +127,16 @@ impl Theme {
             // Kanpeki's day paper.
             egui::Color32::from_rgb(0x93, 0x99, 0xb7)
         };
-        // Pick readable text for whatever background we ended up with.
-        let [r, g, b, _] = bg.to_normalized_gamma_f32();
-        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-        let dark_bg = lum < 0.45;
-        let text_fg = if dark_bg {
-            egui::Color32::from_rgb(232, 232, 232)
+        // The two palettes are a duotone: Night is the Day paper on the night
+        // ink, and Day is the night ink on the Day paper.
+        let text_fg = if dark {
+            egui::Color32::from_rgb(0x93, 0x99, 0xb7)
         } else {
-            egui::Color32::from_rgb(26, 26, 26)
+            egui::Color32::from_rgb(0x32, 0x36, 0x4a)
         };
         // The current line is a shade of the background, never flat gray.
         let shift = |c: u8| -> u8 {
-            if dark_bg {
+            if dark {
                 c.saturating_add(14)
             } else {
                 c.saturating_sub(14)
@@ -141,10 +149,16 @@ impl Theme {
                 mode: ThemeMode::Night,
                 chrome: egui::Color32::from_rgb(30, 30, 30),
                 menu_bar: egui::Color32::from_rgb(42, 42, 42),
-                menu_fg: egui::Color32::from_rgb(220, 220, 220),
+                menu_fg: text_fg,
                 text_bg: bg,
                 text_fg,
-                selection: egui::Color32::from_rgb(46, 92, 138),
+                // Selecting swaps the duotone, like classic inverse video.
+                selection: text_fg,
+                selection_fg: bg,
+                widget_selection: egui::Color32::from_rgb(30, 58, 95),
+                gutter_fg: text_fg.gamma_multiply(0.80),
+                hint_fg: text_fg.gamma_multiply(0.72),
+                caption_fg: text_fg.gamma_multiply(0.75),
                 accent: egui::Color32::from_rgb(111, 179, 255),
                 current_line,
                 status_bg: egui::Color32::from_rgb(38, 38, 38),
@@ -158,10 +172,15 @@ impl Theme {
                 mode: ThemeMode::Day,
                 chrome: egui::Color32::from_rgb(180, 180, 180),
                 menu_bar: egui::Color32::from_rgb(200, 200, 200),
-                menu_fg: egui::Color32::from_rgb(30, 30, 30),
+                menu_fg: text_fg,
                 text_bg: bg,
                 text_fg,
                 selection: egui::Color32::from_rgb(110, 150, 205),
+                selection_fg: text_fg,
+                widget_selection: egui::Color32::from_rgb(110, 150, 205),
+                gutter_fg: text_fg.gamma_multiply(0.55),
+                hint_fg: text_fg.gamma_multiply(0.45),
+                caption_fg: text_fg.gamma_multiply(0.62),
                 accent: egui::Color32::from_rgb(0, 96, 160),
                 current_line,
                 status_bg: egui::Color32::from_rgb(192, 192, 192),
@@ -192,7 +211,7 @@ impl Theme {
         v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, self.menu_fg);
         v.widgets.active.bg_fill = self.widget_hover;
         v.widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, self.menu_fg);
-        v.selection.bg_fill = self.selection;
+        v.selection.bg_fill = self.widget_selection;
         v.selection.stroke = egui::Stroke::new(1.0_f32, self.accent);
         v.hyperlink_color = self.accent;
         v

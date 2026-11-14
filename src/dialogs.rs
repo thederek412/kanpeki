@@ -317,9 +317,7 @@ fn find_body(
         ui.add(
             egui::TextEdit::singleline(text)
                 .hint_text(
-                    egui::RichText::new(hint)
-                        .size(13.0)
-                        .color(theme.text_fg.gamma_multiply(0.45)),
+                    egui::RichText::new(hint).size(13.0).color(theme.hint_fg),
                 )
                 .margin(egui::Margin::symmetric(8.0, 6.0))
                 .desired_width(f32::INFINITY),
@@ -330,7 +328,7 @@ fn find_body(
             egui::RichText::new(text)
                 .size(10.0)
                 .strong()
-                .color(theme.text_fg.gamma_multiply(0.62)),
+                .color(theme.caption_fg),
         );
     };
 
@@ -389,7 +387,7 @@ fn find_body(
                         ThemeMode::Day => egui::Color32::from_rgb(28, 110, 52),
                     }
                 } else {
-                    theme.text_fg.gamma_multiply(0.6)
+                    theme.caption_fg
                 };
                 ui.label(egui::RichText::new(msg).size(12.0).color(color));
             }

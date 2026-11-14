@@ -1488,7 +1488,7 @@ impl DocWindow {
                     Align2::RIGHT_CENTER,
                     (line.row + 1).to_string(),
                     font_id.clone(),
-                    theme.text_fg.gamma_multiply(0.55),
+                    theme.gutter_fg,
                 );
             }
 
@@ -1500,6 +1500,7 @@ impl DocWindow {
             widest = widest.max(chunk_w);
 
             // Selection background for this visual line.
+            let mut sel_rect = None;
             if sel_a != sel_b && vl >= sel_a_vl && vl <= sel_b_vl {
                 let c0 = if vl == sel_a_vl {
                     editor::visual_col_of(&self.doc, &self.map, vl, sel_a)
@@ -1516,6 +1517,7 @@ impl DocWindow {
                     let x1 = area.min.x + PAD + c1 as f32 * glyph_w - self.scroll_x;
                     let sr = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, y + row_h));
                     painter.rect_filled(sr, 0.0, theme.selection);
+                    sel_rect = Some(sr);
                 }
             }
 
@@ -1533,10 +1535,24 @@ impl DocWindow {
                 painter.text(
                     Pos2::new(x, y + row_h * 0.5),
                     Align2::LEFT_CENTER,
-                    shown,
+                    &shown,
                     font_id.clone(),
                     theme.text_fg,
                 );
+                // Repaint the selected run in the inverted colour. Clipping to
+                // the selection rect keeps the glyph positions identical, so
+                // the boundary is exactly the column edge.
+                if let Some(sr) = sel_rect {
+                    if theme.selection_fg != theme.text_fg {
+                        painter.with_clip_rect(sr.intersect(rect)).text(
+                            Pos2::new(x, y + row_h * 0.5),
+                            Align2::LEFT_CENTER,
+                            &shown,
+                            font_id.clone(),
+                            theme.selection_fg,
+                        );
+                    }
+                }
             }
         }
 

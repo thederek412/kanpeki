@@ -10,7 +10,7 @@ Named for the Japanese word for “perfect”.
 - One true OS window per document, with a Window menu listing every open file
 - Deep undo/redo and atomic, crash-safe saves (temp file + fsync + rename)
 - Find & replace: plain text or regex, case-sensitive, whole-word
-- Day (`#9399b7`) and Night (`#32364a`) palettes
+- Duotone Day and Night palettes: `#9399b7` paper and `#32364a` ink, swapped between modes
 - Smooth inertial scrolling, word wrap, optional line numbers
 - Unix, DOS and classic-Mac line endings detected and preserved on save
 - Reads UTF-8 (with BOM), UTF-16 and Latin-1; saves as UTF-8
