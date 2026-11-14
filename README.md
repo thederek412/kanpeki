@@ -15,7 +15,7 @@ Named for the Japanese word for “perfect”.
 - Unix, DOS and classic-Mac line endings detected and preserved on save
 - Reads UTF-8 (with BOM), UTF-16 and Latin-1; saves as UTF-8
 - Large-file friendly (ropey), with word counting on a worker thread
-- Native file picker (zenity) with a built-in fallback dialog
+- Native file dialogs for Open and Save (zenity), with built-in fallbacks
 
 ## Build
 

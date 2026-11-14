@@ -32,7 +32,7 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - Dialog boxes now use a content-sized `Frame` (painting `ui.max_rect()` inside an `Area` fills the screen).
 - `Theme::resolve` now derives text/line colors from the *resolved* background: Day mode was rendering near-white text on white.
 - Dialog × buttons were dead (body action overwrote them); the × was then removed in favour of Close/Cancel.
-- The Open dialog was replaced by the system picker (`zenity`, background thread + channel polled from `redraw`).
+- Open and Save use the system picker (`zenity`, background thread + channel polled from `redraw`); in-app dialogs remain as fallbacks.
 
 ### Verified on this machine (X11, 4480x1440)
 
@@ -46,15 +46,19 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - Unsaved-changes prompt on Ctrl+W / File > Close; Cancel / Don't Save / Save; app exits when the last window closes.
 - About box credits Derek Kalinosky (author) and Craig Marciniak/SaintEdit (inspiration); closes via Close or Esc.
 - File > Open (and Ctrl+O) launches the system file picker; the chosen file loads in place or in a new window.
+- Save (Ctrl+S on an untitled document), Save As (Ctrl+Shift+S) and the close prompt's Save use the system save dialog; cancelling it leaves the document and window alone.
 - Vertical scrollbar appears only when the document is longer than the view; click-to-jump, draggable thumb, hover highlight.
 - Editor painting is clipped to its panel, so scrolled lines never draw over the menu bar or status bar.
 - Optional line-number gutter (View > Line Numbers), persisted; wrapped lines are numbered only on their first visual row.
 
 ### Known environment quirks
 
-- **Window focus:** in this bare X session, a window created already-focused never gets a winit
-  `FocusIn`, so winit's X11 backend drops keyboard events until focus moves away and back
-  (click another window, then this one). Test scripts must do that focus cycle before typing.
+- **Window focus (fixed in-app):** winit 0.29 selects XInput2 `FocusIn` on a window just after
+  mapping it. If the WM focuses the window during that map, the event is missed, `active_window`
+  stays `None`, and `xinput_key_input` silently returns: all typing and shortcuts die while the
+  mouse still works. Kanpeki now detects `!window.has_focus()` on the first frame and performs a
+  one-shot hide/show plus `focus_window()` so the WM delivers `FocusIn` again. Verified: a freshly
+  launched window takes typed text and Ctrl+F without any manual focus cycling.
 - The WM here adds decoration offsets; `xdotool getwindowgeometry` reports the frame origin.
 - `import -window` captures are client-only; add the window origin before comparing with screen clicks.
 
@@ -285,7 +289,7 @@ pub enum Action {
 pub fn show(ctx: &egui::Context, dlg: &mut Dialog, theme: &Theme) -> Action;
 ```
 
-Dialogs are `egui::Window`s centred in the document window (plain `Area`s did not receive clicks under egui-multiwin). About has a Close button, the other dialogs have Cancel, and Esc dismisses any dialog (no × by design). **File > Open now uses the desktop's file picker (`zenity`)**; the in-app Open dialog remains as a fallback when no picker is installed. The Save dialog accepts an absolute path typed into the name field (anything containing `/`).
+Dialogs are `egui::Window`s centred in the document window (plain `Area`s did not receive clicks under egui-multiwin). About has a Close button, the other dialogs have Cancel, and Esc dismisses any dialog (no × by design). **Open and Save now use the desktop's file picker (`zenity`)**; the in-app dialogs remain as fallbacks when no picker is installed. The in-app Save dialog accepts an absolute path typed into the name field (anything containing `/`). The system save dialog starts in the document's directory, pre-filled with its file name (just `Untitled` for a new document, so GTK selects only the base name and does not double an extension).
 
 ---
 
@@ -538,7 +542,7 @@ fn main() {
 - No repaint callback is installed → `ctx.request_repaint()` is a no-op. Use `window.request_redraw()`.
 - Exit: when the window list becomes empty, `run()` calls `event_loop.exit()`.
 
-**winit 0.29.15** — `Window`: `id()`, `has_focus()`, `set_title(&str)`, `request_redraw()`. **No** `close()`, `request_close()`, or `set_focus()`. `Window` is **not** `Clone`.
+**winit 0.29.15** — `Window`: `id()`, `has_focus()`, `set_title(&str)`, `request_redraw()`, `set_visible(bool)`, `focus_window()`. **No** `close()`, `request_close()`, or `set_focus()`. `Window` is **not** `Clone`.
 
 **egui 0.27.2**
 

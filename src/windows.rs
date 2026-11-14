@@ -82,6 +82,8 @@ pub struct DocWindow {
     save_then_close: bool,
     /// A system file picker is running in the background; receives the chosen path.
     pending_open: Option<mpsc::Receiver<Option<PathBuf>>>,
+    /// A system save dialog is running in the background; receives the chosen path.
+    pending_save: Option<mpsc::Receiver<Option<PathBuf>>>,
     /// Winit id of this window (set on first redraw).
     wid: Option<WindowId>,
     /// The last title we set on the window.
@@ -101,6 +103,8 @@ pub struct DocWindow {
     sb_grab: f32,
     /// The pointer is over the scrollbar.
     sb_hover: bool,
+    /// One-shot startup focus repair has run.
+    focus_nudged: bool,
     /// A character to bring into view on the next draw (for edits that run
     /// before the editor's geometry is known, e.g. from the menus).
     pending_scroll: Option<usize>,
@@ -143,6 +147,7 @@ impl DocWindow {
             force_close: false,
             save_then_close: false,
             pending_open: None,
+            pending_save: None,
             wid: None,
             last_title: String::new(),
             words: None,
@@ -154,6 +159,7 @@ impl DocWindow {
             sb_dragging: false,
             sb_grab: 0.0,
             sb_hover: false,
+            focus_nudged: false,
             pending_scroll: None,
             note: None,
         }
@@ -198,32 +204,41 @@ impl DocWindow {
         }
     }
 
-    /// Save the document to its current path (or open the Save dialog).
+    /// Save the document to its current path (or ask for one).
     fn save_current(&mut self, c: &mut AppCommon, rr: &mut RedrawResponse) {
         if let Some(path) = self.doc.path.clone() {
-            match fileio::save(&self.doc, &path) {
-                Ok(()) => {
-                    self.doc.modified = false;
-                    if let Some(s) = path.to_str() {
-                        c.settings.add_recent(s);
-                        c.settings.save();
-                    }
-                    self.note = Some(format!("Saved {}", path.display()));
-                    if self.save_then_close {
-                        self.save_then_close = false;
-                        self.force_close = true;
-                        rr.quit = true;
-                    }
-                }
-                Err(e) => self.note = Some(e),
-            }
+            self.save_to(path, c, rr);
         } else {
-            self.open_save_dialog();
+            self.begin_save();
         }
     }
 
-    /// Open the Save dialog pre-filled with the document's name, if any.
-    fn open_save_dialog(&mut self) {
+    /// Write the document to `path` and update the window/settings.
+    fn save_to(&mut self, path: PathBuf, c: &mut AppCommon, rr: &mut RedrawResponse) {
+        match fileio::save(&self.doc, &path) {
+            Ok(()) => {
+                self.doc.path = Some(path.clone());
+                self.doc.modified = false;
+                if let Some(s) = path.to_str() {
+                    c.settings.add_recent(s);
+                    c.settings.save();
+                }
+                self.note = Some(format!("Saved {}", path.display()));
+                if self.save_then_close {
+                    self.save_then_close = false;
+                    self.force_close = true;
+                    rr.quit = true;
+                }
+            }
+            Err(e) => self.note = Some(e),
+        }
+    }
+
+    /// Ask for a file name: the system dialog if available, else the built-in one.
+    fn begin_save(&mut self) {
+        if self.pending_save.is_some() || self.pending_open.is_some() {
+            return;
+        }
         let dir = self
             .doc
             .path
@@ -238,7 +253,40 @@ impl DocWindow {
             .and_then(|p| p.file_name())
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        self.dialog = Some(Dialog::Save(dialogs::SaveDlg { dir, name, error: None }));
+
+        if !zenity_available() {
+            self.dialog = Some(Dialog::Save(dialogs::SaveDlg { dir, name, error: None }));
+            return;
+        }
+
+        let suggested = if name.is_empty() {
+            dir.join("Untitled")
+        } else {
+            dir.join(&name)
+        };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let out = std::process::Command::new("zenity")
+                .arg("--file-selection")
+                .arg("--save")
+                .arg("--title=Save File")
+                .arg(format!("--filename={}", suggested.display()))
+                .output();
+            let path = match out {
+                Ok(o) if o.status.success() => {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(s))
+                    }
+                }
+                _ => None,
+            };
+            let _ = tx.send(path);
+        });
+        self.pending_save = Some(rx);
+        self.note = Some("Choose where to save…".to_string());
     }
 
     /// Open (or load in place) a file from disk.
@@ -325,6 +373,33 @@ impl DocWindow {
         });
         self.pending_open = Some(rx);
         self.note = Some("Choose a file…".to_string());
+    }
+
+    /// Collect the system save dialog's result when it finishes.
+    fn poll_save_picker(&mut self, c: &mut AppCommon, rr: &mut RedrawResponse, window: &Window) {
+        if self.pending_save.is_none() {
+            return;
+        }
+        let msg = self.pending_save.as_ref().map(|rx| rx.try_recv());
+        match msg {
+            Some(Ok(Some(path))) => {
+                self.pending_save = None;
+                self.note = None;
+                self.save_to(path, c, rr);
+            }
+            Some(Ok(None)) => {
+                self.pending_save = None;
+                // Cancelling the save from the close prompt must not close.
+                self.save_then_close = false;
+                self.note = Some("Save cancelled.".to_string());
+            }
+            Some(Err(mpsc::TryRecvError::Empty)) => {
+                window.request_redraw();
+            }
+            _ => {
+                self.pending_save = None;
+            }
+        }
     }
 
     /// Collect the system picker's result when it finishes.
@@ -420,11 +495,26 @@ impl TrackedWindow for DocWindow {
             self.last_title = wm_title;
         }
 
+        // A window the WM focuses while it is being mapped can miss winit's
+        // `FocusIn`, which leaves winit's active window unset and silently drops
+        // every key event (typing and shortcuts alike). A single hide/show cycle
+        // makes the WM deliver `FocusIn` again; do it once, on the first frame.
+        if !self.focus_nudged {
+            self.focus_nudged = true;
+            if !window.has_focus() {
+                window.set_visible(false);
+                window.set_visible(true);
+                window.focus_window();
+                window.request_redraw();
+            }
+        }
+
         let mut rr = RedrawResponse::default();
         let modal = self.close_prompt || self.dialog.is_some();
 
-        // A background system file picker may have returned a path.
+        // Background system dialogs may have returned a path.
         self.poll_open_picker(c, &mut rr, window);
+        self.poll_save_picker(c, &mut rr, window);
 
         // While a modal is up, only Escape (and the dialog's own widgets) act.
         if modal {
@@ -558,7 +648,7 @@ impl DocWindow {
             ui.close_menu();
         }
         if ui.button("Save As…").clicked() {
-            self.open_save_dialog();
+            self.begin_save();
             ui.close_menu();
         }
         ui.separator();
@@ -921,7 +1011,7 @@ impl DocWindow {
                 true
             }
             (Key::S, true) => {
-                self.open_save_dialog();
+                self.begin_save();
                 true
             }
             (Key::W, _) => {
@@ -1714,7 +1804,7 @@ impl DocWindow {
                 } else {
                     // Untitled: ask for a name, then close once saved.
                     self.save_then_close = true;
-                    self.open_save_dialog();
+                    self.begin_save();
                 }
             }
         }
@@ -1736,23 +1826,7 @@ impl DocWindow {
             }
             Action::SaveFile(path) => {
                 self.dialog = None;
-                match fileio::save(&self.doc, &path) {
-                    Ok(()) => {
-                        self.doc.path = Some(path.clone());
-                        self.doc.modified = false;
-                        if let Some(s) = path.to_str() {
-                            c.settings.add_recent(s);
-                            c.settings.save();
-                        }
-                        self.note = Some(format!("Saved {}", path.display()));
-                        if self.save_then_close {
-                            self.save_then_close = false;
-                            self.force_close = true;
-                            rr.quit = true;
-                        }
-                    }
-                    Err(e) => self.note = Some(e),
-                }
+                self.save_to(path, c, rr);
             }
             Action::FindNext(forward) => {
                 if let Some(Dialog::Find { search, .. }) = &self.dialog {
