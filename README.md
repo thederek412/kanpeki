@@ -17,6 +17,20 @@ Named for the Japanese word for “perfect”.
 - Large-file friendly (ropey), with word counting on a worker thread
 - Native file dialogs for Open and Save (zenity), with built-in fallbacks
 
+## Screenshots
+
+![Kanpeki in Day mode](docs/kanpeki-day.png)
+
+*Day colours, line numbers and the status bar.*
+
+![Kanpeki in Night mode](docs/kanpeki-night.png)
+
+*Night colours.*
+
+![Find & Replace](docs/kanpeki-find.png)
+
+*Find & Replace, with the first match selected.*
+
 ## Build
 
 Requires a stable Rust toolchain.

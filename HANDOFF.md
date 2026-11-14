@@ -23,6 +23,7 @@
 | `src/dialogs.rs` | Complete ✔ |
 | `src/windows.rs` | **Complete and tested** (TrackedWindow, menus, input/editing/find, drawing, status bar, close prompt) |
 | `src/main.rs` | **Written and building** (code below) |
+| `docs/` | README screenshots (Day, Night, Find & Replace), captured from the release build |
 | Build | **Clean** — `cargo build` succeeds, 3 benign warnings (unused macro import, unused `Scroll::step/clamp`, unused `Theme::chrome`) |
 
 Already fixed while writing Parts 2–5 (avoid re-introducing these):
