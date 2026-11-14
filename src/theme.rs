@@ -25,6 +25,12 @@ pub struct Settings {
     #[serde(default)]
     pub line_numbers: bool,
     pub recents: Vec<String>,
+    /// Last window size, in physical pixels.
+    #[serde(default)]
+    pub window_size: Option<[f32; 2]>,
+    /// Last window position, in physical pixels.
+    #[serde(default)]
+    pub window_pos: Option<[f32; 2]>,
 }
 
 impl Default for Settings {
@@ -35,6 +41,8 @@ impl Default for Settings {
             wrap: false,
             line_numbers: false,
             recents: Vec::new(),
+            window_size: None,
+            window_pos: None,
         }
     }
 }

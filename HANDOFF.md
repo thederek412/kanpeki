@@ -67,16 +67,38 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - The WM here adds decoration offsets; `xdotool getwindowgeometry` reports the frame origin.
 - `import -window` captures are client-only; add the window origin before comparing with screen clicks.
 
-### Optional polish (not required)
+### Polish added after 1.0.0
 
-- Group consecutive typing into one undo step (currently per keystroke, like classic Mac editors).
-- A horizontal scrollbar for unwrapped long lines.
-- Ctrl+Home / Ctrl+End for document start/end; triple-click line selection.
-- Auto-scroll when dragging a selection past the window edge.
-- Ask before overwriting an existing file in the Save dialog.
-- Open a path typed on the command line; remember last window size/position.
+- **Menu shortcuts flush right.** Drop-down rows are custom `menu_item` rows
+  (`MENU_W = 250`): the label sits left, the shortcut right, and disabled rows
+  are weak/inert. Native `ui.button`s remain for the Open Recent submenu and
+  the checkboxes in View.
+- **Scrollbars read at a glance.** The thumb is drawn in `theme.accent`
+  (dimmed to 60% until hovered/dragged). The old neutral `theme.border` thumb
+  was almost the same value as the track in both palettes.
+- **Horizontal scrollbar** when word wrap is off and the widest line overflows.
+  `VisualMap.max_width` (cells) is computed by `build_visual_map`; the text is
+  clipped to the text area so horizontally scrolled lines never paint over the
+  line-number gutter. Drag/click the track or use the wheel with Shift.
+- **Coalesced undo.** `Doc::push_undo` merges contiguous typing (`Insert` at the
+  end of the previous run) and contiguous Backspace/Delete runs into one step,
+  capped at `UNDO_GROUP_CAP` (4000 chars).
+- **Ctrl+Home / Ctrl+End** go to the document start/end (Shift extends).
+- **Triple-click** selects the current line (newline excluded).
+- **Drag auto-scroll**: dragging a selection past an edge scrolls and keeps
+  extending until the button is released (`redraw_again` requests frames).
+- **Overwrite confirmation** in the built-in Save dialog: a second Save (same
+  path) confirms. The system picker keeps GTK's own confirmation; the
+  `--confirm-overwrite` flag is passed but is deprecated/no-op on current zenity.
+- **Command-line path** opens in the first window (`kanpeki FILE`).
+- **Window geometry is remembered** across runs (`window_size` / `window_pos`
+  in settings.json). It is written once the window has been still for 0.75 s,
+  and again on close, so dragging does not hammer the settings file.
 
-Nothing has been compiled yet. Expect a round of normal compile fixes on the first build.
+Note (egui 0.27): `button_double_clicked` / `button_triple_clicked` are true on
+**release**, not on press. Kanpeki applies word/line selection on the release
+frame; handling them inside the `pressed` branch silently breaks double-click
+unless press and release land in the same frame.
 
 ---
 
@@ -141,7 +163,9 @@ theme.rs     — Settings (persisted), Theme palettes (Day/Night), egui visuals
 ### Data-flow decisions (already locked in)
 
 - Text is **always stored with `\n`** in the rope. `Doc.eol` is detected on load and re-applied on save (`fileio::render_for_save`).
-- Undo is **op-based** (`Insert` / `Delete` / `Replace` / `ReplaceAll`), cap 400. `Doc::undo()` / `Doc::redo()` return `Option<usize>` = caret position to restore.
+- Undo is **op-based** (`Insert` / `Delete` / `Replace` / `ReplaceAll`), cap 400, and
+  contiguous typing/deleting is coalesced into groups (cap 4000 chars).
+  `Doc::undo()` / `Doc::redo()` return `Option<usize>` = caret position to restore.
 - `Doc.edits: u64` bumps on every change; used as the visual-map cache key.
 - Save is atomic: temp file in the same dir → `write_all` → `sync_all` → `rename` → best-effort dir fsync.
 - Settings persist to `~/.config/kanpeki/settings.json` (migrates the old `saintedit` file once) (recents capped at 8).
@@ -195,7 +219,10 @@ impl Doc {
 
 ```rust
 pub struct VisualLine { pub char_start: usize, pub row: usize, pub len: usize }
-pub struct VisualMap { pub lines: Vec<VisualLine> }   // construct with VisualMap { lines: Vec::new() }
+pub struct VisualMap {
+    pub lines: Vec<VisualLine>,
+    pub max_width: usize,             // widest line in cells (0 when wrapped)
+}                                    // construct with VisualMap { lines: Vec::new(), max_width: 0 }
 
 pub fn visual_width(s: &str) -> usize;                            // tab = 4 cells
 pub fn build_visual_map(doc: &Doc, wrap: bool, cols: usize) -> VisualMap; // O(doc)
@@ -258,6 +285,10 @@ pub struct Settings {
     #[serde(default)]
     pub line_numbers: bool,
     pub recents: Vec<String>,
+    #[serde(default)]
+    pub window_size: Option<[f32; 2]>,  // physical pixels
+    #[serde(default)]
+    pub window_pos: Option<[f32; 2]>,   // outer position
 }
 impl Settings { pub fn load() -> Self; pub fn save(&self); pub fn add_recent(&mut self, path: &str); }
 
@@ -573,7 +604,8 @@ fn main() {
 ## Remaining work checklist
 
 Everything required is implemented, building, and exercised on the X11 desktop.
-Optional improvements are listed under "Optional polish" above.
+All items from the old optional-polish list are now implemented; see "Polish
+added after 1.0.0" above.
 
 ### Acceptance tests
 

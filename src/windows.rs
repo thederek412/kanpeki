@@ -97,14 +97,29 @@ pub struct DocWindow {
     words_rx: mpsc::Receiver<(u64, usize)>,
     /// A selection drag is in progress.
     dragging: bool,
+    /// The next redraw should ask for another frame (e.g. drag auto-scroll).
+    redraw_again: bool,
     /// The scrollbar thumb is being dragged.
     sb_dragging: bool,
     /// Pointer offset within the thumb when the drag started.
     sb_grab: f32,
     /// The pointer is over the scrollbar.
     sb_hover: bool,
+    /// The horizontal scrollbar thumb is being dragged.
+    hsb_dragging: bool,
+    /// Pointer offset within the horizontal thumb when the drag started.
+    hsb_grab: f32,
+    /// The pointer is over the horizontal scrollbar.
+    hsb_hover: bool,
+    /// Height of the text area on the last draw (set by `draw_editor`).
+    view_h: f32,
     /// One-shot startup focus repair has run.
     focus_nudged: bool,
+    /// Last geometry seen (x, y, w, h), in physical pixels.
+    last_geom: Option<(i32, i32, u32, u32)>,
+    /// A geometry change waiting to be persisted, and when it last changed.
+    geom_pending: Option<(i32, i32, u32, u32)>,
+    geom_since: f64,
     /// A character to bring into view on the next draw (for edits that run
     /// before the editor's geometry is known, e.g. from the menus).
     pending_scroll: Option<usize>,
@@ -129,6 +144,55 @@ fn short_name(p: &str) -> String {
         .unwrap_or_else(|| p.to_string())
 }
 
+/// Width every drop-down menu is laid out to, so the shortcut column lines up.
+const MENU_W: f32 = 250.0;
+
+/// A menu row: the label on the left and its keyboard shortcut flush right,
+/// the way a classic menu bar reads. Returns true when the row was clicked.
+fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
+    let row_h = ui.spacing().interact_size.y.max(21.0);
+    let width = ui.available_width().max(MENU_W);
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, row_h), sense);
+
+    if ui.is_rect_visible(rect) {
+        let hovered = enabled && response.hovered();
+        if hovered {
+            let fill = ui.visuals().widgets.hovered.weak_bg_fill;
+            ui.painter()
+                .rect_filled(rect.shrink2(egui::vec2(3.0, 1.0)), 3.0, fill);
+        }
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let text_color = if enabled {
+            ui.visuals().text_color()
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        ui.painter().text(
+            Pos2::new(rect.min.x + 10.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            font.clone(),
+            text_color,
+        );
+        if !shortcut.is_empty() {
+            ui.painter().text(
+                Pos2::new(rect.max.x - 10.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                shortcut,
+                font,
+                ui.visuals().weak_text_color(),
+            );
+        }
+    }
+
+    enabled && response.clicked()
+}
+
 impl DocWindow {
     /// A fresh window for `doc`.
     pub fn new(doc: Doc) -> Self {
@@ -138,7 +202,7 @@ impl DocWindow {
             sel: Selection::default(),
             scroll: Scroll::new(),
             scroll_x: 0.0,
-            map: editor::VisualMap { lines: Vec::new() },
+            map: editor::VisualMap { lines: Vec::new(), max_width: 0 },
             map_key: MapKey::INVALID,
             dialog: None,
             find: Search::default(),
@@ -156,10 +220,18 @@ impl DocWindow {
             words_tx: tx,
             words_rx: rx,
             dragging: false,
+            redraw_again: false,
             sb_dragging: false,
             sb_grab: 0.0,
             sb_hover: false,
+            hsb_dragging: false,
+            hsb_grab: 0.0,
+            hsb_hover: false,
+            view_h: 0.0,
             focus_nudged: false,
+            last_geom: None,
+            geom_pending: None,
+            geom_since: 0.0,
             pending_scroll: None,
             note: None,
         }
@@ -170,12 +242,27 @@ impl DocWindow {
         let seq = c.window_seq;
         c.window_seq += 1;
         let title = doc_title(&doc);
+        let size = c
+            .settings
+            .window_size
+            .map(|[w, h]| {
+                egui_multiwin::winit::dpi::PhysicalSize::new(
+                    (w as u32).max(360),
+                    (h as u32).max(240),
+                )
+            })
+            .unwrap_or(egui_multiwin::winit::dpi::PhysicalSize::new(1024, 720));
+        let base = c
+            .settings
+            .window_pos
+            .map(|[x, y]| (x as i32, y as i32))
+            .unwrap_or((70, 50));
         let builder = egui_multiwin::winit::window::WindowBuilder::new()
             .with_title(format!("{title} - Kanpeki"))
-            .with_inner_size(egui_multiwin::winit::dpi::PhysicalSize::new(1024, 720))
+            .with_inner_size(size)
             .with_position(egui_multiwin::winit::dpi::PhysicalPosition::new(
-                70 + (seq % 10) * 36,
-                50 + (seq % 10) * 28,
+                base.0 + (seq % 10) as i32 * 36,
+                base.1 + (seq % 10) as i32 * 28,
             ))
             .with_window_icon(crate::icon::app_icon());
         NewWindowRequest::new(
@@ -256,7 +343,12 @@ impl DocWindow {
             .unwrap_or_default();
 
         if !zenity_available() {
-            self.dialog = Some(Dialog::Save(dialogs::SaveDlg { dir, name, error: None }));
+            self.dialog = Some(Dialog::Save(dialogs::SaveDlg {
+                dir,
+                name,
+                error: None,
+                confirm: None,
+            }));
             return;
         }
 
@@ -270,6 +362,7 @@ impl DocWindow {
             let out = std::process::Command::new("zenity")
                 .arg("--file-selection")
                 .arg("--save")
+                .arg("--confirm-overwrite")
                 .arg("--title=Save File")
                 .arg(format!("--filename={}", suggested.display()))
                 .output();
@@ -447,6 +540,12 @@ impl TrackedWindow for DocWindow {
     fn can_quit(&mut self, c: &mut AppCommon) -> bool {
         // Called twice on a close attempt (try_quit, then do_window_events),
         // so keep this idempotent.
+        if let Some(g) = self.last_geom {
+            // Remember the window's place even if it was moved just now.
+            c.settings.window_pos = Some([g.0 as f32, g.1 as f32]);
+            c.settings.window_size = Some([g.2 as f32, g.3 as f32]);
+            c.settings.save();
+        }
         if self.doc.modified && !self.force_close {
             // Don't close yet: the prompt is drawn on the next redraw.
             self.close_prompt = true;
@@ -511,6 +610,28 @@ impl TrackedWindow for DocWindow {
             }
         }
 
+        // --- Window geometry: remember it, and persist it once it settles
+        // (so dragging a window does not write the settings file per frame).
+        if let (Ok(pos), size) = (window.outer_position(), window.inner_size()) {
+            let geom = (pos.x, pos.y, size.width, size.height);
+            if self.last_geom != Some(geom) {
+                self.last_geom = Some(geom);
+                self.geom_pending = Some(geom);
+                self.geom_since = ctx.input(|i| i.time);
+            }
+        }
+        if let Some(geom) = self.geom_pending {
+            let now = ctx.input(|i| i.time);
+            if now - self.geom_since >= 0.75 {
+                c.settings.window_pos = Some([geom.0 as f32, geom.1 as f32]);
+                c.settings.window_size = Some([geom.2 as f32, geom.3 as f32]);
+                c.settings.save();
+                self.geom_pending = None;
+            } else {
+                window.request_redraw();
+            }
+        }
+
         let mut rr = RedrawResponse::default();
         let modal = self.close_prompt || self.dialog.is_some();
 
@@ -548,6 +669,10 @@ impl TrackedWindow for DocWindow {
                 }
             });
 
+        if std::mem::take(&mut self.redraw_again) {
+            window.request_redraw();
+        }
+
         // --- Status bar.
         egui::TopBottomPanel::bottom("statusbar")
             .frame(egui::Frame::none().fill(theme.status_bg))
@@ -569,7 +694,8 @@ impl TrackedWindow for DocWindow {
 
         // --- Smooth scrolling: keep the event loop awake while gliding.
         let dt = ctx.input(|i| i.stable_dt);
-        if self.step_scroll(editor_rect.height(), row_h, dt) {
+        let view_h = if self.view_h > 0.0 { self.view_h } else { editor_rect.height() };
+        if self.step_scroll(view_h, row_h, dt) {
             window.request_redraw();
         }
 
@@ -613,11 +739,14 @@ impl DocWindow {
 
     /// File: new/open/save/close document windows.
     fn file_menu(&mut self, ui: &mut egui::Ui, c: &mut AppCommon, rr: &mut RedrawResponse) {
-        if ui.button("New (Ctrl+N)").clicked() {
+        ui.set_max_width(MENU_W);
+        ui.spacing_mut().menu_width = MENU_W;
+
+        if menu_item(ui, "New", "Ctrl+N", true) {
             rr.new_windows.push(DocWindow::request(Doc::blank(), c));
             ui.close_menu();
         }
-        if ui.button("Open… (Ctrl+O)").clicked() {
+        if menu_item(ui, "Open…", "Ctrl+O", true) {
             self.begin_open();
             ui.close_menu();
         }
@@ -641,20 +770,20 @@ impl DocWindow {
         });
 
         ui.separator();
-        if ui.button("Close (Ctrl+W)").clicked() {
+        if menu_item(ui, "Close", "Ctrl+W", true) {
             self.begin_close(rr);
             ui.close_menu();
         }
-        if ui.button("Save (Ctrl+S)").clicked() {
+        if menu_item(ui, "Save", "Ctrl+S", true) {
             self.save_current(c, rr);
             ui.close_menu();
         }
-        if ui.button("Save As…").clicked() {
+        if menu_item(ui, "Save As…", "Ctrl+Shift+S", true) {
             self.begin_save();
             ui.close_menu();
         }
         ui.separator();
-        if ui.button("Quit Kanpeki").clicked() {
+        if menu_item(ui, "Quit Kanpeki", "", true) {
             // Close through the unsaved-changes prompt; the app exits when
             // the last window is gone.
             self.begin_close(rr);
@@ -664,62 +793,53 @@ impl DocWindow {
 
     /// Edit: undo/redo, clipboard, selection, and find & replace.
     fn edit_menu(&mut self, ui: &mut egui::Ui, clipboard: &mut arboard::Clipboard) {
+        ui.set_max_width(MENU_W);
+        ui.spacing_mut().menu_width = MENU_W;
+
         let can_undo = self.doc.can_undo();
-        if ui
-            .add_enabled(can_undo, egui::Button::new("Undo (Ctrl+Z)"))
-            .clicked()
-        {
+        if menu_item(ui, "Undo", "Ctrl+Z", can_undo) {
             self.do_undo();
             ui.close_menu();
         }
         let can_redo = self.doc.can_redo();
-        if ui
-            .add_enabled(can_redo, egui::Button::new("Redo (Ctrl+Shift+Z)"))
-            .clicked()
-        {
+        if menu_item(ui, "Redo", "Ctrl+Shift+Z", can_redo) {
             self.do_redo();
             ui.close_menu();
         }
 
         ui.separator();
         let has_sel = !self.sel.is_empty();
-        if ui
-            .add_enabled(has_sel, egui::Button::new("Cut (Ctrl+X)"))
-            .clicked()
-        {
+        if menu_item(ui, "Cut", "Ctrl+X", has_sel) {
             self.do_cut(clipboard);
             ui.close_menu();
         }
-        if ui
-            .add_enabled(has_sel, egui::Button::new("Copy (Ctrl+C)"))
-            .clicked()
-        {
+        if menu_item(ui, "Copy", "Ctrl+C", has_sel) {
             self.do_copy(clipboard);
             ui.close_menu();
         }
-        if ui.button("Paste (Ctrl+V)").clicked() {
+        if menu_item(ui, "Paste", "Ctrl+V", true) {
             self.paste_from(clipboard);
             ui.close_menu();
         }
-        if ui.button("Select All (Ctrl+A)").clicked() {
+        if menu_item(ui, "Select All", "Ctrl+A", true) {
             self.sel.set(0, self.doc.len_chars());
             ui.close_menu();
         }
 
         ui.separator();
-        if ui.button("Find… (Ctrl+F)").clicked() {
+        if menu_item(ui, "Find…", "Ctrl+F", true) {
             self.open_find();
             ui.close_menu();
         }
-        if ui.button("Find Next (Ctrl+G)").clicked() {
+        if menu_item(ui, "Find Next", "Ctrl+G", true) {
             self.find_now(true);
             ui.close_menu();
         }
-        if ui.button("Find Previous (Ctrl+Shift+G)").clicked() {
+        if menu_item(ui, "Find Previous", "Ctrl+Shift+G", true) {
             self.find_now(false);
             ui.close_menu();
         }
-        if ui.button("Replace… (Ctrl+H)").clicked() {
+        if menu_item(ui, "Replace…", "Ctrl+H", true) {
             self.open_find();
             ui.close_menu();
         }
@@ -727,6 +847,8 @@ impl DocWindow {
 
     /// View: word wrap, font size, Day/Night, custom background.
     fn view_menu(&mut self, ui: &mut egui::Ui, c: &mut AppCommon) {
+        ui.set_max_width(MENU_W);
+        ui.spacing_mut().menu_width = MENU_W;
         let mut wrap = c.settings.wrap;
         if ui.checkbox(&mut wrap, "Word Wrap").changed() {
             c.settings.wrap = wrap;
@@ -771,6 +893,8 @@ impl DocWindow {
 
     /// Window: the list of open documents (the current one marked).
     fn window_menu(&mut self, ui: &mut egui::Ui, c: &mut AppCommon) {
+        ui.set_max_width(MENU_W);
+        ui.spacing_mut().menu_width = MENU_W;
         if c.doc_entries.is_empty() {
             ui.add_enabled(false, egui::Label::new("(no documents)"));
             return;
@@ -786,7 +910,9 @@ impl DocWindow {
 
     /// Help: the About box (crediting the original).
     fn help_menu(&mut self, ui: &mut egui::Ui) {
-        if ui.button("About Kanpeki").clicked() {
+        ui.set_max_width(MENU_W);
+        ui.spacing_mut().menu_width = MENU_W;
+        if menu_item(ui, "About Kanpeki", "", true) {
             self.dialog = Some(Dialog::About);
             ui.close_menu();
         }
@@ -799,6 +925,9 @@ const PAD: f32 = 8.0;
 /// Width of the scrollbar gutter on the right edge of the editor.
 const SB_W: f32 = 12.0;
 
+/// Height of the horizontal scrollbar gutter at the bottom of the editor.
+const SB_H: f32 = 10.0;
+
 /// Width of the line-number gutter (0 when the numbers are off).
 fn gutter_width(show: bool, total_lines: usize, glyph_w: f32) -> f32 {
     if !show {
@@ -808,23 +937,38 @@ fn gutter_width(show: bool, total_lines: usize, glyph_w: f32) -> f32 {
     digits as f32 * glyph_w + 10.0
 }
 
-/// The text area: after the line-number gutter, before the scrollbar.
-fn text_area(rect: Rect, gutter: f32) -> Rect {
+/// The text area: after the line-number gutter, before the scrollbars.
+fn text_area(rect: Rect, gutter: f32, hscroll: bool) -> Rect {
+    let bottom = if hscroll { rect.max.y - SB_H } else { rect.max.y };
     Rect::from_min_max(
         Pos2::new(rect.min.x + gutter, rect.min.y),
         Pos2::new(
             (rect.max.x - SB_W).max(rect.min.x + gutter + 1.0),
-            rect.max.y,
+            bottom,
         ),
     )
 }
 
-/// The visible scrollbar track.
-fn scrollbar_track(rect: Rect) -> Rect {
+/// The visible vertical scrollbar track.
+fn scrollbar_track(rect: Rect, hscroll: bool) -> Rect {
+    let bottom = if hscroll { rect.max.y - SB_H } else { rect.max.y };
     Rect::from_min_max(
         Pos2::new(rect.max.x - SB_W + 2.0, rect.min.y + PAD),
-        Pos2::new(rect.max.x - 2.0, rect.max.y - PAD),
+        Pos2::new(rect.max.x - 2.0, (bottom - PAD).max(rect.min.y + PAD + 1.0)),
     )
+}
+
+/// The visible horizontal scrollbar track, under the text area.
+fn hscrollbar_track(rect: Rect, gutter: f32) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(rect.min.x + gutter + PAD, rect.max.y - SB_H + 2.0),
+        Pos2::new(rect.max.x - SB_W - PAD, rect.max.y - 2.0),
+    )
+}
+
+/// Is a horizontal scrollbar needed for the current map and width?
+fn needs_hscroll(map: &editor::VisualMap, wrap: bool, area_w: f32, glyph_w: f32) -> bool {
+    !wrap && map.max_width as f32 * glyph_w + 2.0 * PAD > area_w
 }
 
 impl DocWindow {
@@ -840,11 +984,15 @@ impl DocWindow {
         rr: &mut RedrawResponse,
     ) {
         let gutter = gutter_width(c.settings.line_numbers, self.doc.len_lines(), glyph_w);
-        let text = text_area(rect, gutter);
-        let track = scrollbar_track(rect);
+        let provisional = text_area(rect, gutter, false);
+        let hscroll = needs_hscroll(&self.map, c.settings.wrap, provisional.width(), glyph_w);
+        let text = text_area(rect, gutter, hscroll);
+        let track = scrollbar_track(rect, hscroll);
+        let htrack = hscrollbar_track(rect, gutter);
         let pos = ctx.input(|i| i.pointer.interact_pos());
         let over_text = pos.map(|p| text.contains(p)).unwrap_or(false);
         let over_sb = pos.map(|p| track.contains(p)).unwrap_or(false);
+        let over_hsb = hscroll && pos.map(|p| htrack.contains(p)).unwrap_or(false);
 
         let pressed = ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
         let released = ctx.input(|i| i.pointer.button_released(egui::PointerButton::Primary));
@@ -854,43 +1002,105 @@ impl DocWindow {
         self.sb_hover = over_sb || self.sb_dragging;
         if over_sb && pressed {
             if let Some(p) = pos {
-                let (_, thumb_y, thumb_h) = self.scrollbar_geom(rect, track, row_h);
+                let (_, thumb_y, thumb_h) = self.scrollbar_geom(text, track, row_h);
                 if p.y >= thumb_y && p.y <= thumb_y + thumb_h {
                     self.sb_dragging = true;
                     self.sb_grab = p.y - thumb_y;
                 } else {
                     self.sb_dragging = true;
                     self.sb_grab = thumb_h * 0.5;
-                    self.scroll_from_y(p.y - self.sb_grab, rect, track, row_h);
+                    self.scroll_from_y(p.y - self.sb_grab, text, track, row_h);
                 }
             }
         }
         if self.sb_dragging && down {
             if let Some(p) = pos {
-                self.scroll_from_y(p.y - self.sb_grab, rect, track, row_h);
+                self.scroll_from_y(p.y - self.sb_grab, text, track, row_h);
             }
         }
         if released || !down {
             self.sb_dragging = false;
         }
 
-        // --- Mouse in the text: click for the caret, drag to select, double-click a word.
+        // --- Horizontal scrollbar (only when unwrapped lines overflow).
+        self.hsb_hover = over_hsb || self.hsb_dragging;
+        if over_hsb && pressed {
+            if let Some(p) = pos {
+                let (_, thumb_x, thumb_w) = self.hscrollbar_geom(text, htrack, glyph_w);
+                if p.x >= thumb_x && p.x <= thumb_x + thumb_w {
+                    self.hsb_dragging = true;
+                    self.hsb_grab = p.x - thumb_x;
+                } else {
+                    self.hsb_dragging = true;
+                    self.hsb_grab = thumb_w * 0.5;
+                    self.scroll_from_x(p.x - self.hsb_grab, text, htrack, glyph_w);
+                }
+            }
+        }
+        if self.hsb_dragging && down {
+            if let Some(p) = pos {
+                self.scroll_from_x(p.x - self.hsb_grab, text, htrack, glyph_w);
+            }
+        }
+        if released || !down {
+            self.hsb_dragging = false;
+        }
+
+        // --- Mouse in the text: click for the caret, drag to select,
+        // double-click a word, triple-click the whole line.
         if over_text {
             let double =
                 ctx.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
+            let triple =
+                ctx.input(|i| i.pointer.button_triple_clicked(egui::PointerButton::Primary));
             if let Some(p) = pos {
                 if pressed {
+                    self.sel.collapse(self.char_at(text, p, row_h, glyph_w));
+                    self.dragging = true;
+                }
+                if double || triple {
+                    // egui reports the click count on *release*, so the word
+                    // or line selection is applied here rather than on press.
                     let ch = self.char_at(text, p, row_h, glyph_w);
-                    if double {
-                        let (s, e) = editor::word_range(&self.doc, ch);
+                    if triple {
+                        let (s, e) = self.line_range_at(ch);
                         self.sel.set(s, e);
                         self.pending_scroll = Some(s);
                     } else {
-                        self.sel.collapse(ch);
-                        self.dragging = true;
+                        let (s, e) = editor::word_range(&self.doc, ch);
+                        self.sel.set(s, e);
+                        self.pending_scroll = Some(s);
                     }
-                } else if self.dragging && down {
-                    self.sel.head = self.char_at(text, p, row_h, glyph_w);
+                    self.dragging = false;
+                }
+            }
+        }
+        // A drag continues even when the pointer leaves the text area, so the
+        // selection can be pulled past an edge; the view scrolls to follow.
+        if self.dragging && down {
+            if let Some(p) = pos {
+                self.sel.head = self.char_at(text, p, row_h, glyph_w);
+                let mut moved = false;
+                if p.y < text.min.y + PAD {
+                    self.scroll.offset = (self.scroll.offset - row_h * 0.5).max(0.0);
+                    self.scroll.velocity = 0.0;
+                    moved = true;
+                } else if p.y > text.max.y - PAD {
+                    self.scroll.offset += row_h * 0.5;
+                    self.scroll.velocity = 0.0;
+                    moved = true;
+                }
+                if !c.settings.wrap {
+                    if p.x < text.min.x + PAD {
+                        self.scroll_x = (self.scroll_x - glyph_w * 2.0).max(0.0);
+                        moved = true;
+                    } else if p.x > text.max.x - PAD {
+                        self.scroll_x += glyph_w * 2.0;
+                        moved = true;
+                    }
+                }
+                if moved {
+                    self.redraw_again = true;
                 }
             }
         }
@@ -960,6 +1170,13 @@ impl DocWindow {
         }
     }
 
+    /// The character range of the line containing `ch` (newline excluded).
+    fn line_range_at(&self, ch: usize) -> (usize, usize) {
+        let line = self.doc.char_to_line(ch.min(self.doc.len_chars()));
+        let start = self.doc.line_start(line);
+        (start, start + self.doc.line_text(line).chars().count())
+    }
+
     /// The character index under a screen position in the editor.
     fn char_at(&self, rect: Rect, pos: Pos2, row_h: f32, glyph_w: f32) -> usize {
         if self.map.lines.is_empty() {
@@ -1024,6 +1241,25 @@ impl DocWindow {
             }
             (Key::H, _) => {
                 self.open_find();
+                true
+            }
+            (Key::Home, _) => {
+                if shift {
+                    self.sel.head = 0;
+                } else {
+                    self.sel.collapse(0);
+                }
+                self.pending_scroll = Some(0);
+                true
+            }
+            (Key::End, _) => {
+                let pos = self.doc.len_chars();
+                if shift {
+                    self.sel.head = pos;
+                } else {
+                    self.sel.collapse(pos);
+                }
+                self.pending_scroll = Some(pos);
                 true
             }
             (Key::A, _) => {
@@ -1433,8 +1669,11 @@ impl DocWindow {
         line_numbers: bool,
     ) {
         let gutter = gutter_width(line_numbers, self.doc.len_lines(), glyph_w);
-        let area = text_area(rect, gutter);
-        self.ensure_map(wrap, area.width(), glyph_w, font_size);
+        let provisional = text_area(rect, gutter, false);
+        self.ensure_map(wrap, provisional.width(), glyph_w, font_size);
+        let hscroll = needs_hscroll(&self.map, wrap, provisional.width(), glyph_w);
+        let area = text_area(rect, gutter, hscroll);
+        self.view_h = area.height();
 
         // Reveal a caret position queued by an edit or a find.
         if let Some(ch) = self.pending_scroll.take() {
@@ -1443,13 +1682,17 @@ impl DocWindow {
 
         // Keep the scroll offset inside the content.
         let total = self.map.lines.len() as f32 * row_h + 2.0 * PAD;
-        let max_scroll = (total - rect.height()).max(0.0);
+        let max_scroll = (total - area.height()).max(0.0);
         self.scroll.offset = self.scroll.offset.clamp(0.0, max_scroll);
 
         // Clip the editor's painting to its own panel; otherwise the lines
-        // can draw over the menu bar and status bar while scrolling.
-        let clipped = ui.painter().with_clip_rect(rect);
-        let painter = &clipped;
+        // can draw over the menu bar, status bar or scrollbars while scrolling.
+        let clip = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, area.max.y));
+        let full = ui.painter().with_clip_rect(clip);
+        // Text is clipped to the text area so a horizontally scrolled line
+        // never paints over the line-number gutter.
+        let text_clipped = ui.painter().with_clip_rect(area);
+        let painter = &text_clipped;
         if self.map.lines.is_empty() {
             return;
         }
@@ -1458,7 +1701,7 @@ impl DocWindow {
         let nlines = self.map.lines.len();
         let first =
             (((off - PAD) / row_h.max(1.0)).floor().max(0.0) as usize).min(nlines - 1);
-        let last = ((((off + rect.height()) / row_h.max(1.0)).ceil() as usize) + 1).min(nlines);
+        let last = ((((off + area.height()) / row_h.max(1.0)).ceil() as usize) + 1).min(nlines);
 
         let caret_vl = editor::visual_of_char(&self.map, self.sel.head);
         let caret_row = self.map.lines[caret_vl.min(nlines - 1)].row;
@@ -1466,8 +1709,6 @@ impl DocWindow {
         let (sel_a, sel_b) = self.sel.range();
         let sel_a_vl = editor::visual_of_char(&self.map, sel_a);
         let sel_b_vl = editor::visual_of_char(&self.map, sel_b);
-
-        let mut widest = 0usize;
 
         for vl in first..last {
             let line = self.map.lines[vl];
@@ -1479,12 +1720,12 @@ impl DocWindow {
                     Pos2::new(rect.min.x, y),
                     Pos2::new(area.max.x, y + row_h),
                 );
-                painter.rect_filled(hl, 0.0, theme.current_line);
+                full.rect_filled(hl, 0.0, theme.current_line);
             }
 
             // A line number only on the first visual row of a wrapped line.
             if gutter > 0.0 && (vl == 0 || self.map.lines[vl - 1].row != line.row) {
-                painter.text(
+                full.text(
                     Pos2::new(rect.min.x + gutter - 7.0, y + row_h * 0.5),
                     Align2::RIGHT_CENTER,
                     (line.row + 1).to_string(),
@@ -1498,7 +1739,6 @@ impl DocWindow {
             let co = line.char_start.saturating_sub(line_start);
             let chunk = editor::char_slice(&text, co, co + line.len);
             let chunk_w = editor::visual_width(chunk);
-            widest = widest.max(chunk_w);
 
             // Selection background for this visual line.
             let mut sel_rect = None;
@@ -1545,7 +1785,7 @@ impl DocWindow {
                 // the boundary is exactly the column edge.
                 if let Some(sr) = sel_rect {
                     if theme.selection_fg != theme.text_fg {
-                        painter.with_clip_rect(sr.intersect(rect)).text(
+                        painter.with_clip_rect(sr.intersect(area)).text(
                             Pos2::new(x, y + row_h * 0.5),
                             Align2::LEFT_CENTER,
                             &shown,
@@ -1557,11 +1797,10 @@ impl DocWindow {
             }
         }
 
-        // Horizontal bound, including the caret's line so the view doesn't
-        // snap back while typing at the end of a long line.
-        let caret_line_w = editor::visual_width(&self.doc.line_text(caret_row));
-        let widest = widest.max(caret_line_w);
-        let max_x = (widest as f32 * glyph_w - area.width() + 2.0 * PAD).max(0.0);
+        // Horizontal bound: the widest line in the document, so the view can
+        // reach the end of any line (the horizontal scrollbar maps to this).
+        let content_w = self.map.max_width as f32 * glyph_w + 2.0 * PAD;
+        let max_x = (content_w - area.width()).max(0.0);
         self.scroll_x = self.scroll_x.clamp(0.0, max_x);
 
         // The insertion point: a solid bar, in the spirit of System 7.
@@ -1577,24 +1816,30 @@ impl DocWindow {
         // A hairline between the gutter and the text.
         if gutter > 0.0 {
             let x = rect.min.x + gutter - 1.0;
-            painter.rect_filled(
-                Rect::from_min_max(Pos2::new(x, rect.min.y), Pos2::new(x + 1.0, rect.max.y)),
+            full.rect_filled(
+                Rect::from_min_max(Pos2::new(x, rect.min.y), Pos2::new(x + 1.0, area.max.y)),
                 0.0,
                 theme.border.gamma_multiply(0.55),
             );
         }
 
-        self.draw_scrollbar(painter, rect, row_h, theme);
+        self.draw_scrollbar(&full, area, rect, row_h, theme, hscroll);
+        if hscroll {
+            let htrack = hscrollbar_track(rect, gutter);
+            self.draw_hscrollbar(&full, area, htrack, glyph_w, theme);
+        }
     }
 
     /// (max scroll, thumb top, thumb height) in track coordinates.
-    fn scrollbar_geom(&self, rect: Rect, track: Rect, row_h: f32) -> (f32, f32, f32) {
+    /// `view` is the text area, not the whole panel, so the thumb reaches the
+    /// end of its track exactly when the last line is reached.
+    fn scrollbar_geom(&self, view: Rect, track: Rect, row_h: f32) -> (f32, f32, f32) {
         let total = self.map.lines.len() as f32 * row_h + 2.0 * PAD;
-        let max = (total - rect.height()).max(0.0);
+        let max = (total - view.height()).max(0.0);
         if max <= 0.0 {
             return (0.0, track.min.y, track.height());
         }
-        let frac = (rect.height() / total).clamp(0.0, 1.0);
+        let frac = (view.height() / total).clamp(0.0, 1.0);
         let thumb_h = (track.height() * frac).max(28.0).min(track.height());
         let t = (self.scroll.offset / max).clamp(0.0, 1.0);
         let y = track.min.y + t * (track.height() - thumb_h);
@@ -1602,8 +1847,8 @@ impl DocWindow {
     }
 
     /// Scroll so the thumb's top lands at `y`.
-    fn scroll_from_y(&mut self, y: f32, rect: Rect, track: Rect, row_h: f32) {
-        let (max, _, thumb_h) = self.scrollbar_geom(rect, track, row_h);
+    fn scroll_from_y(&mut self, y: f32, view: Rect, track: Rect, row_h: f32) {
+        let (max, _, thumb_h) = self.scrollbar_geom(view, track, row_h);
         if max <= 0.0 {
             return;
         }
@@ -1614,18 +1859,77 @@ impl DocWindow {
     }
 
     /// Draw the vertical scrollbar in the right-hand gutter.
-    fn draw_scrollbar(&self, painter: &egui::Painter, rect: Rect, row_h: f32, theme: &Theme) {
-        let track = scrollbar_track(rect);
-        let (max, y, h) = self.scrollbar_geom(rect, track, row_h);
+    fn draw_scrollbar(
+        &self,
+        painter: &egui::Painter,
+        view: Rect,
+        rect: Rect,
+        row_h: f32,
+        theme: &Theme,
+        hscroll: bool,
+    ) {
+        let track = scrollbar_track(rect, hscroll);
+        let (max, y, h) = self.scrollbar_geom(view, track, row_h);
         if max <= 0.0 {
             return;
         }
         painter.rect_filled(track, 4.0, theme.current_line);
         let thumb = Rect::from_min_size(Pos2::new(track.min.x, y), egui::vec2(track.width(), h));
+        // The thumb must read against the track in both palettes: the theme's
+        // neutral border is nearly the same value as the track, so use the
+        // accent instead and dim it until the pointer is near.
         let color = if self.sb_dragging || self.sb_hover {
             theme.accent
         } else {
-            theme.border
+            theme.accent.gamma_multiply(0.60)
+        };
+        painter.rect_filled(thumb, 4.0, color);
+    }
+
+    /// (max horizontal scroll, thumb left, thumb width) in track coordinates.
+    fn hscrollbar_geom(&self, area: Rect, track: Rect, glyph_w: f32) -> (f32, f32, f32) {
+        let content = self.map.max_width as f32 * glyph_w + 2.0 * PAD;
+        let max = (content - area.width()).max(0.0);
+        if max <= 0.0 {
+            return (0.0, track.min.x, track.width());
+        }
+        let frac = (area.width() / content).clamp(0.0, 1.0);
+        let thumb_w = (track.width() * frac).max(28.0).min(track.width());
+        let t = (self.scroll_x / max).clamp(0.0, 1.0);
+        let x = track.min.x + t * (track.width() - thumb_w);
+        (max, x, thumb_w)
+    }
+
+    /// Scroll so the horizontal thumb's left lands at `x`.
+    fn scroll_from_x(&mut self, x: f32, area: Rect, track: Rect, glyph_w: f32) {
+        let (max, _, thumb_w) = self.hscrollbar_geom(area, track, glyph_w);
+        if max <= 0.0 {
+            return;
+        }
+        let span = (track.width() - thumb_w).max(1.0);
+        let t = ((x - track.min.x) / span).clamp(0.0, 1.0);
+        self.scroll_x = t * max;
+    }
+
+    /// Draw the horizontal scrollbar under the text.
+    fn draw_hscrollbar(
+        &self,
+        painter: &egui::Painter,
+        area: Rect,
+        track: Rect,
+        glyph_w: f32,
+        theme: &Theme,
+    ) {
+        let (max, x, w) = self.hscrollbar_geom(area, track, glyph_w);
+        if max <= 0.0 {
+            return;
+        }
+        painter.rect_filled(track, 4.0, theme.current_line);
+        let thumb = Rect::from_min_size(Pos2::new(x, track.min.y), egui::vec2(w, track.height()));
+        let color = if self.hsb_dragging || self.hsb_hover {
+            theme.accent
+        } else {
+            theme.accent.gamma_multiply(0.60)
         };
         painter.rect_filled(thumb, 4.0, color);
     }

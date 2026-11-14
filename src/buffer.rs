@@ -73,6 +73,9 @@ enum Op {
 
 const UNDO_CAP: usize = 400;
 
+/// Longest run of keystrokes that collapses into a single undo step.
+const UNDO_GROUP_CAP: usize = 4000;
+
 /// A text document: the rope, where it lives on disk, and its undo stacks.
 pub struct Doc {
     /// The text itself (newlines normalized to `\n`).
@@ -173,9 +176,44 @@ impl Doc {
     }
 
     fn push_undo(&mut self, op: Op) {
-        self.undo.push(op);
-        if self.undo.len() > UNDO_CAP {
-            self.undo.remove(0);
+        // Runs of typing (or of Backspace / Delete) collapse into one undo
+        // step, as in the classic Mac editors, so Ctrl+Z unwinds a whole
+        // word or sentence rather than a single keystroke. The cap keeps one
+        // enormous paste from becoming an equally enormous single group.
+        let mut merged = false;
+        if let Some(last) = self.undo.last_mut() {
+            match (last, &op) {
+                (Op::Insert { at, text }, Op::Insert { at: new_at, text: new }) => {
+                    let end = *at + text.chars().count();
+                    let total = text.chars().count() + new.chars().count();
+                    if *new_at == end && total <= UNDO_GROUP_CAP {
+                        text.push_str(new);
+                        merged = true;
+                    }
+                }
+                (Op::Delete { at, text }, Op::Delete { at: new_at, text: new }) => {
+                    let total = text.chars().count() + new.chars().count();
+                    if total <= UNDO_GROUP_CAP {
+                        if *new_at + new.chars().count() == *at {
+                            // Backspace: the new text precedes the last run.
+                            text.insert_str(0, new);
+                            *at = *new_at;
+                            merged = true;
+                        } else if *new_at == *at {
+                            // Forward Delete: the new text follows the last run.
+                            text.push_str(new);
+                            merged = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !merged {
+            self.undo.push(op);
+            if self.undo.len() > UNDO_CAP {
+                self.undo.remove(0);
+            }
         }
         self.redo.clear();
         self.modified = true;

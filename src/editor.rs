@@ -18,6 +18,9 @@ pub struct VisualLine {
 pub struct VisualMap {
     /// The visual lines, in order.
     pub lines: Vec<VisualLine>,
+    /// Widest visual line, in monospace cells (0 while word wrap is on,
+    /// which never scrolls horizontally).
+    pub max_width: usize,
 }
 
 /// Display width of a string in monospace cells (a tab is 4 cells).
@@ -32,10 +35,13 @@ pub fn visual_width(s: &str) -> usize {
 pub fn build_visual_map(doc: &Doc, wrap: bool, cols: usize) -> VisualMap {
     let nlines = doc.len_lines();
     let mut lines: Vec<VisualLine> = Vec::with_capacity(nlines);
+    let mut max_width = 0usize;
     for row in 0..nlines {
         let start = doc.line_start(row);
         let text = doc.line_text(row);
         if !wrap || cols == 0 {
+            let w = visual_width(&text);
+            max_width = max_width.max(w);
             lines.push(VisualLine {
                 char_start: start,
                 row,
@@ -65,7 +71,7 @@ pub fn build_visual_map(doc: &Doc, wrap: bool, cols: usize) -> VisualMap {
             lines.push(VisualLine { char_start: start + co, row, len: cl });
         }
     }
-    VisualMap { lines }
+    VisualMap { lines, max_width }
 }
 
 /// The visual line index containing character `idx`.

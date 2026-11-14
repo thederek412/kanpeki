@@ -13,11 +13,13 @@ Named for the Japanese word for “perfect”.
 - Deep undo/redo and atomic, crash-safe saves (temp file + fsync + rename)
 - Find & replace: plain text or regex, case-sensitive, whole-word
 - Duotone Day and Night palettes: `#9399b7` paper and `#32364a` ink, swapped between modes
-- Smooth inertial scrolling, word wrap, optional line numbers
+- Smooth inertial scrolling, vertical and horizontal scrollbars, word wrap, optional line numbers
+- Word/line selection, drag-to-select with auto-scroll, grouped undo
 - Unix, DOS and classic-Mac line endings detected and preserved on save
 - Reads UTF-8 (with BOM), UTF-16 and Latin-1; saves as UTF-8
 - Large-file friendly (ropey), with word counting on a worker thread
-- Native file dialogs for Open and Save (zenity), with built-in fallbacks
+- Native file dialogs for Open and Save (zenity), with built-in fallbacks and overwrite confirmation
+- Opens a file named on the command line; remembers the last window size and position
 
 ## Screenshots
 

@@ -91,8 +91,25 @@ fn main() {
         window_seq: 0,
     };
 
-    egui_multiwin_dynamic::multi_window::MultiWindow::start(|mw, event_loop, _proxy| {
-        let req = windows::DocWindow::request(buffer::Doc::blank(), &mut common);
+    // A path given on the command line opens in the first window.
+    let initial = std::env::args().nth(1).map(std::path::PathBuf::from).and_then(|path| {
+        match fileio::load(&path) {
+            Ok(loaded) => Some(buffer::Doc::from_text(
+                &loaded.text,
+                loaded.eol,
+                loaded.encoding,
+                Some(path),
+            )),
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                None
+            }
+        }
+    });
+
+    egui_multiwin_dynamic::multi_window::MultiWindow::start(move |mw, event_loop, _proxy| {
+        let doc = initial.unwrap_or_else(buffer::Doc::blank);
+        let req = windows::DocWindow::request(doc, &mut common);
         if let Err(e) = mw.add(req, &mut common, event_loop) {
             eprintln!("Couldn't open the first window: {e:?}");
         }

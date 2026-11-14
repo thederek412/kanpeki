@@ -47,6 +47,8 @@ pub struct SaveDlg {
     pub name: String,
     /// An error to display.
     pub error: Option<String>,
+    /// A path that is about to be overwritten; a second Save confirms it.
+    pub confirm: Option<PathBuf>,
 }
 
 /// What the user did in a dialog.
@@ -292,6 +294,15 @@ fn save_body(ui: &mut egui::Ui, d: &mut SaveDlg, theme: &Theme) -> Action {
                 } else {
                     d.dir.join(&d.name)
                 };
+                if p.exists() && d.confirm.as_ref() != Some(&p) {
+                    // Saving over an existing file takes a second click.
+                    d.confirm = Some(p.clone());
+                    d.error = Some(format!(
+                        "{} already exists. Press Save again to replace it.",
+                        p.display()
+                    ));
+                    return Action::None;
+                }
                 return Action::SaveFile(p);
             }
             Action::None
