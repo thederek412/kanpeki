@@ -325,6 +325,7 @@ impl DocWindow {
         self.dialog = Some(Dialog::Find {
             search: self.find.clone(),
             error: None,
+            focus: true,
         });
     }
 

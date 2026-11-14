@@ -50,6 +50,7 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - Vertical scrollbar appears only when the document is longer than the view; click-to-jump, draggable thumb, hover highlight.
 - Editor painting is clipped to its panel, so scrolled lines never draw over the menu bar or status bar.
 - Optional line-number gutter (View > Line Numbers), persisted; wrapped lines are numbered only on their first visual row.
+- Find & Replace is a tidied modal: centered, accent title rule, full-width fields with hints, uppercase captions, a primary *Next* button, and a status line that distinguishes info (muted), success (green) and errors (red). The query field is focused (and selected) on open; Enter/Shift+Enter find next/previous; actions are disabled for an empty query; the query keeps keyboard focus after Find/Replace.
 
 ### Known environment quirks
 
@@ -289,7 +290,7 @@ pub enum Action {
 pub fn show(ctx: &egui::Context, dlg: &mut Dialog, theme: &Theme) -> Action;
 ```
 
-Dialogs are `egui::Window`s centred in the document window (plain `Area`s did not receive clicks under egui-multiwin). About has a Close button, the other dialogs have Cancel, and Esc dismisses any dialog (no × by design). **Open and Save now use the desktop's file picker (`zenity`)**; the in-app dialogs remain as fallbacks when no picker is installed. The in-app Save dialog accepts an absolute path typed into the name field (anything containing `/`). The system save dialog starts in the document's directory, pre-filled with its file name (just `Untitled` for a new document, so GTK selects only the base name and does not double an extension).
+Dialogs are `egui::Window`s anchored `CENTER_CENTER` (so they are truly centred regardless of their auto height) with a soft drop shadow, an accent rule beside the title, and a hairline under it (plain `Area`s did not receive clicks under egui-multiwin). About has a Close button, the other dialogs have Cancel, and Esc dismisses any dialog (no × by design). **Open and Save now use the desktop's file picker (`zenity`)**; the in-app dialogs remain as fallbacks when no picker is installed. The in-app Save dialog accepts an absolute path typed into the name field (anything containing `/`). The system save dialog starts in the document's directory, pre-filled with its file name (just `Untitled` for a new document, so GTK selects only the base name and does not double an extension).
 
 ---
 

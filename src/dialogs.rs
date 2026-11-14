@@ -8,7 +8,7 @@ use egui_multiwin::egui;
 
 use crate::fileio;
 use crate::search::Search;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeMode};
 
 /// The open dialogs.
 pub enum Dialog {
@@ -22,6 +22,8 @@ pub enum Dialog {
         search: Search,
         /// An error message, if the query is bad.
         error: Option<String>,
+        /// The search field has not been focused yet.
+        focus: bool,
     },
     /// Custom background color picker.
     Color {
@@ -79,21 +81,20 @@ pub enum Action {
 
 /// Draw a dialog and report the user's action.
 pub fn show(ctx: &egui::Context, dlg: &mut Dialog, theme: &Theme) -> Action {
-    let screen = ctx.screen_rect();
     match dlg {
-        Dialog::Open(d) => dialog_box(ctx, "open_dialog", screen, theme, "Open", move |ui| {
+        Dialog::Open(d) => dialog_box(ctx, "open_dialog", theme, "Open", move |ui| {
             open_body(ui, d, theme)
         }),
-        Dialog::Save(d) => dialog_box(ctx, "save_dialog", screen, theme, "Save", move |ui| {
+        Dialog::Save(d) => dialog_box(ctx, "save_dialog", theme, "Save", move |ui| {
             save_body(ui, d, theme)
         }),
-        Dialog::Find { search, error } => dialog_box(ctx, "find_dialog", screen, theme, "Find & Replace", |ui| {
-            find_body(ui, search, error, theme)
+        Dialog::Find { search, error, focus } => dialog_box(ctx, "find_dialog", theme, "Find & Replace", |ui| {
+            find_body(ui, search, error, theme, focus)
         }),
-        Dialog::Color { r, g, b } => dialog_box(ctx, "color_dialog", screen, theme, "Background Color", |ui| {
+        Dialog::Color { r, g, b } => dialog_box(ctx, "color_dialog", theme, "Background Color", |ui| {
             color_body(ui, r, g, b, theme)
         }),
-        Dialog::About => dialog_box(ctx, "about_dialog", screen, theme, "About Kanpeki", |ui| {
+        Dialog::About => dialog_box(ctx, "about_dialog", theme, "About Kanpeki", |ui| {
             about_body(ui, theme);
             ui.add_space(10.0);
             let mut act = Action::None;
@@ -111,17 +112,18 @@ pub fn show(ctx: &egui::Context, dlg: &mut Dialog, theme: &Theme) -> Action {
     }
 }
 
-/// A centered, fixed-size dialog box. Returns the action from `body`.
+/// A centered dialog box with a title rule and a soft drop shadow. Returns the
+/// action from `body`.
 fn dialog_box(
     ctx: &egui::Context,
     id: &'static str,
-    screen: egui::Rect,
     theme: &Theme,
     title: &str,
     body: impl FnOnce(&mut egui::Ui) -> Action,
 ) -> Action {
-    let size = egui::vec2(460.0, 340.0);
-    let pos = screen.center() - size / 2.0;
+    const WIDTH: f32 = 480.0;
+    const MARGIN: f32 = 16.0;
+
     let mut action = Action::None;
     egui::Window::new(id)
         .id(egui::Id::new(id))
@@ -129,23 +131,60 @@ fn dialog_box(
         .collapsible(false)
         .resizable(false)
         .movable(false)
-        .fixed_pos(pos)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .frame(
             egui::Frame::none()
                 .fill(theme.dialog_bg)
                 .stroke(egui::Stroke::new(1.0_f32, theme.border))
-                .rounding(4.0)
-                .inner_margin(egui::Margin::same(12.0)),
+                .rounding(6.0)
+                .inner_margin(egui::Margin::same(MARGIN))
+                .shadow(egui::epaint::Shadow {
+                    offset: egui::vec2(0.0, 6.0),
+                    blur: 18.0,
+                    spread: 0.0,
+                    color: egui::Color32::from_black_alpha(70),
+                }),
         )
         .show(ctx, |ui| {
-            ui.set_width(size.x - 24.0);
-            ui.strong(egui::RichText::new(title).size(15.0));
-            ui.add_space(2.0);
-            ui.separator();
-            ui.add_space(4.0);
+            ui.set_width(WIDTH - 2.0 * MARGIN);
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 7.0);
+
+            // A small accent rule, then the title.
+            ui.horizontal(|ui| {
+                let (bar, _) =
+                    ui.allocate_exact_size(egui::vec2(3.0, 17.0), egui::Sense::hover());
+                ui.painter().rect_filled(bar, 1.5, theme.accent);
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(title)
+                        .size(15.0)
+                        .strong()
+                        .color(theme.text_fg),
+                );
+            });
+
+            // A hairline under the title (the egui separator is disabled by
+            // the theme's noninteractive stroke settings).
+            ui.add_space(5.0);
+            let y = ui.cursor().min.y;
+            painter_rule(
+                ui,
+                egui::Rect::from_min_size(
+                    egui::pos2(ui.max_rect().left(), y),
+                    egui::vec2(ui.available_width(), 1.0),
+                ),
+                theme.border.gamma_multiply(0.7),
+            );
+            ui.add_space(10.0);
+
             action = body(ui);
         });
     action
+}
+
+/// Paint a one-pixel rule.
+fn painter_rule(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
+    ui.painter().rect_filled(rect, 0.0, color);
 }
 
 fn open_body(ui: &mut egui::Ui, d: &mut OpenDlg, theme: &Theme) -> Action {
@@ -276,50 +315,159 @@ fn save_body(ui: &mut egui::Ui, d: &mut SaveDlg, theme: &Theme) -> Action {
     act
 }
 
-fn find_body(ui: &mut egui::Ui, s: &mut Search, error: &mut Option<String>, theme: &Theme) -> Action {
+fn find_body(
+    ui: &mut egui::Ui,
+    s: &mut Search,
+    error: &mut Option<String>,
+    theme: &Theme,
+    focus: &mut bool,
+) -> Action {
+    // Text fields sit on the dialog's control color rather than egui's
+    // default "extreme" background.
+    ui.visuals_mut().extreme_bg_color = theme.widget_fill;
+    ui.spacing_mut().button_padding = egui::vec2(10.0, 5.0);
+
+    let field = |ui: &mut egui::Ui, text: &mut String, hint: &str| {
+        ui.add(
+            egui::TextEdit::singleline(text)
+                .hint_text(
+                    egui::RichText::new(hint)
+                        .size(13.0)
+                        .color(theme.text_fg.gamma_multiply(0.45)),
+                )
+                .margin(egui::Margin::symmetric(8.0, 6.0))
+                .desired_width(f32::INFINITY),
+        )
+    };
+    let caption = |ui: &mut egui::Ui, text: &str| {
+        ui.label(
+            egui::RichText::new(text)
+                .size(10.0)
+                .strong()
+                .color(theme.text_fg.gamma_multiply(0.62)),
+        );
+    };
+
+    caption(ui, "FIND");
+    let find_resp = field(ui, &mut s.query, "Text or regular expression");
+    if *focus {
+        // Focus the query and select it, so reopening the dialog and typing
+        // replaces the previous term (as in any file manager or editor).
+        find_resp.request_focus();
+        if let Some(mut state) =
+            egui::widgets::text_edit::TextEditState::load(ui.ctx(), find_resp.id)
+        {
+            let n = s.query.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(n),
+            )));
+            state.store(ui.ctx(), find_resp.id);
+        }
+        *focus = false;
+    }
+    if find_resp.changed() {
+        // A fresh term makes the old "no matches" verdict stale.
+        *error = None;
+    }
+
+    ui.add_space(3.0);
+    caption(ui, "REPLACE WITH");
+    field(ui, &mut s.replacement, "Replacement text (optional)");
+
+    ui.add_space(5.0);
     ui.horizontal(|ui| {
-        ui.label("Find:");
-        ui.text_edit_singleline(&mut s.query);
-    });
-    ui.horizontal(|ui| {
-        ui.label("Replace:");
-        ui.text_edit_singleline(&mut s.replacement);
-    });
-    ui.add_space(2.0);
-    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 18.0;
         ui.checkbox(&mut s.case_sensitive, "Match case");
         ui.checkbox(&mut s.whole_word, "Whole word");
         ui.checkbox(&mut s.regex, "Regex");
     });
-    if let Some(err) = error.as_ref() {
-        ui.label(egui::RichText::new(err).color(egui::Color32::from_rgb(200, 40, 40)));
-    }
-    ui.add_space(6.0);
-    let act = ui
-        .allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 26.0),
+
+    // Status line: reserved even when empty, so the buttons never jump.
+    ui.add_space(2.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 17.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if let Some(msg) = error.as_ref() {
+                // Errors are red, successful replacements green, plain
+                // information (such as "No matches found.") muted.
+                let color = if msg.starts_with("Invalid") {
+                    match theme.mode {
+                        ThemeMode::Night => egui::Color32::from_rgb(255, 140, 140),
+                        ThemeMode::Day => egui::Color32::from_rgb(168, 38, 38),
+                    }
+                } else if msg.starts_with("Replaced") {
+                    match theme.mode {
+                        ThemeMode::Night => egui::Color32::from_rgb(124, 204, 143),
+                        ThemeMode::Day => egui::Color32::from_rgb(28, 110, 52),
+                    }
+                } else {
+                    theme.text_fg.gamma_multiply(0.6)
+                };
+                ui.label(egui::RichText::new(msg).size(12.0).color(color));
+            }
+        },
+    );
+    ui.add_space(2.0);
+
+    let has_query = !s.query.trim().is_empty();
+    let mut act = Action::None;
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(has_query, egui::Button::new("Previous"))
+            .clicked()
+        {
+            act = Action::FindNext(false);
+        }
+        let next = egui::Button::new(
+            egui::RichText::new("Next").color(on_accent(theme)),
+        )
+        .fill(theme.accent);
+        if ui.add_enabled(has_query, next).clicked() {
+            act = Action::FindNext(true);
+        }
+        ui.with_layout(
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-            if ui.button("Cancel").clicked() {
-                return Action::Close;
-            }
-            if ui.button("Replace All").clicked() {
-                return Action::ReplaceAll;
-            }
-            if ui.button("Replace").clicked() {
-                return Action::Replace;
-            }
-            if ui.button("< Previous").clicked() {
-                return Action::FindNext(false);
-            }
-            if ui.button("Next >").clicked() {
-                return Action::FindNext(true);
-            }
-            Action::None
-        })
-        .inner;
-    let _ = theme;
+                if ui.button("Close").clicked() {
+                    act = Action::Close;
+                }
+                if ui
+                    .add_enabled(has_query, egui::Button::new("Replace All"))
+                    .clicked()
+                {
+                    act = Action::ReplaceAll;
+                }
+                if ui
+                    .add_enabled(has_query, egui::Button::new("Replace"))
+                    .clicked()
+                {
+                    act = Action::Replace;
+                }
+            },
+        );
+    });
+
+    // Enter finds the next match; Shift+Enter goes back.
+    let (enter, shift) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.modifiers.shift));
+    if matches!(act, Action::None) && enter && has_query {
+        act = Action::FindNext(!shift);
+    }
+    // Clicking a button (or pressing Enter) must not leave the dialog without a
+    // keyboard target: put the caret back in the query field.
+    if !matches!(act, Action::None | Action::Close) {
+        find_resp.request_focus();
+    }
     act
+}
+
+/// Readable text on the accent-colored primary button.
+fn on_accent(theme: &Theme) -> egui::Color32 {
+    match theme.mode {
+        ThemeMode::Night => egui::Color32::from_rgb(18, 22, 30),
+        ThemeMode::Day => egui::Color32::WHITE,
+    }
 }
 
 fn color_body(ui: &mut egui::Ui, r: &mut u8, g: &mut u8, b: &mut u8, theme: &Theme) -> Action {
