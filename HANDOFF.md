@@ -3,7 +3,7 @@
 **Date:** 2026-11-14
 **Project:** `/run/media/derekk/USB/kanpeki`
 **Author:** Derek Kalinosky
-**Goal:** **Kanpeki** — a fast, multi-window native text editor in the spirit of the classic System 7 editor **SaintEdit** (Craig Marciniak, 1993) for Manjaro/X11: multiple true OS windows (one per document), deep undo, atomic safe saves, find & replace, Day/Night palettes + custom background, FastScrolls-style smooth scrolling, line-ending auto-detect/convert (Unix/DOS/classic Mac), large-file support, status bar, About box crediting the original.
+**Goal:** **Kanpeki** — a fast, multi-window native text editor in the spirit of the classic System 7 editor **SaintEdit** (Craig Marciniak, 1993) for Manjaro/X11: multiple true OS windows (one per document), deep undo, atomic safe saves, find & replace, Day/Night palettes, FastScrolls-style smooth scrolling, line-ending auto-detect/convert (Unix/DOS/classic Mac), large-file support, status bar, About box crediting the original.
 
 **No speech/TTS, no printing** (user explicitly excluded).
 
@@ -40,7 +40,7 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - Typing, caret, click/drag selection, double-click word select; status bar Ln/Col, bytes, words, EOL, encoding, notes.
 - Save (atomic), Save As with full paths, recents; title/status update after save.
 - Undo/redo (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y), find & replace (Next/Previous/Replace/Replace All with messages).
-- Word wrap (reflows long lines), Day/Night, custom background apply + reset (persisted in `settings.json`).
+- Word wrap (reflows long lines) and Day/Night palettes (persisted in `settings.json`).
 - EOL round-trips: CRLF file stayed CRLF, classic-Mac CR stayed CR, UTF-8 BOM preserved; each detected correctly.
 - 8.96 MB file: opens in about a second, wheel scrolling with inertia, typing stays instant (word count off-thread).
 - Unsaved-changes prompt on Ctrl+W / File > Close; Cancel / Don't Save / Save; app exits when the last window closes.
@@ -50,6 +50,7 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
 - Vertical scrollbar appears only when the document is longer than the view; click-to-jump, draggable thumb, hover highlight.
 - Editor painting is clipped to its panel, so scrolled lines never draw over the menu bar or status bar.
 - Optional line-number gutter (View > Line Numbers), persisted; wrapped lines are numbered only on their first visual row.
+- The custom-background option was removed: it fought the Day/Night palettes (and the derived current-line/selection colours). Existing settings files that still contain `custom_bg` load fine; the field is ignored.
 - Find & Replace is a tidied modal: centered, accent title rule, full-width fields with hints, uppercase captions, a primary *Next* button, and a status line that distinguishes info (muted), success (green) and errors (red). The query field is focused (and selected) on open; Enter/Shift+Enter find next/previous; actions are disabled for an empty query; the query keeps keyboard focus after Find/Replace.
 
 ### Known environment quirks
@@ -249,7 +250,6 @@ pub enum ThemeMode { Day, Night }
 pub struct Settings {
     pub font_size: f32,          // default 15.0
     pub theme_mode: ThemeMode,
-    pub custom_bg: Option<[u8; 3]>,
     pub wrap: bool,
     #[serde(default)]
     pub line_numbers: bool,
@@ -363,7 +363,7 @@ fn redraw(&mut self, c: &mut AppCommon, egui: &mut EguiGlow, window: &Window,
 
 - File: New (Ctrl+N) → `rr.new_windows.push(DocWindow::request(Doc::blank(), c))`; Open… → `Dialog::Open(OpenDlg { dir: fileio::default_dir(), name: "", error: None })`; Open Recent (submenu over `c.settings.recents.clone()`, label = `short_name`); Close (Ctrl+W) → `begin_close`; Save (Ctrl+S) → `save_current`; Save As… → `open_save_dialog`; Quit Kanpeki → `begin_close` (goes through the unsaved prompt; the app exits when the last window closes).
 - Edit: Undo/Redo via `ui.add_enabled(self.doc.can_undo(), egui::Button::new(...))`; Cut/Copy/Paste (need `&mut arboard::Clipboard` threaded into the menu fn); Select All; Find… (Ctrl+F), Find Next (Ctrl+G), Find Previous (Ctrl+Shift+G), Replace… (Ctrl+H) — both Find and Replace open `open_find()`; Count Words → `self.count_words()` (background thread).
-- View: `ui.checkbox(&mut c.settings.wrap, "Word Wrap")`; font `A−`/`A+` buttons clamped 8.0..=32.0; `ui.radio_value(&mut c.settings.theme_mode, ThemeMode::Day/Night, ...)`; Background Color… → `Dialog::Color { r, g, b }` seeded from `custom_bg.unwrap_or([255,255,255])`. Call `c.settings.save()` after changes.
+- View: `ui.checkbox(&mut c.settings.wrap, "Word Wrap")`; font `A−`/`A+` buttons clamped 8.0..=32.0; `ui.radio_value(&mut c.settings.theme_mode, ThemeMode::Day/Night, ...)`. Call `c.settings.save()` after changes.
 - Window: informational document list from `c.doc_entries` (`(WindowId, title, dirty)`) — current window marked `▸` + strong, others weak. (Cross-window focus is impossible: winit `Window` is not `Clone`, has no `set_focus`, and `request_close` does not exist in 0.29.15.)
 - Help: About → `Dialog::About`.
 
@@ -412,7 +412,6 @@ fn redraw(&mut self, c: &mut AppCommon, egui: &mut EguiGlow, window: &Window,
   - `OpenFile(path)` → `open_path(path, c, rr)`
   - `SaveFile(path)` → `fileio::save`; on success set `doc.path`, `modified = false`, recents, and `rr.quit = true` if `save_then_close`
   - `FindNext` / `Replace` / `ReplaceAll` as above
-  - `ApplyColor(r,g,b)` → `c.settings.custom_bg = Some([r,g,b]); save()`
 
 **How "close" works (verified in egui-multiwin 0.5.2):**
 `CloseRequested` → `control_flow = None` → `try_quit` → `can_quit`. If it returns `false`, the window stays alive (and the next input event triggers a redraw, which shows the prompt). Returning `RedrawResponse { quit: true, .. }` from `redraw` starts the same flow, so a "programmatic close" is just `rr.quit = true` and goes through `can_quit`. `can_quit` is called **twice** (in `try_quit` and again in `do_window_events`) — keep it idempotent. When the last window is removed, `run()` calls `event_loop.exit()`.
@@ -575,5 +574,5 @@ Optional improvements are listed under "Optional polish" above.
 - 10 MB file: opens fast, scrolls smoothly (inertia), typing stays responsive (word count is off-thread).
 - CRLF file round-trips byte-identically on save; classic-Mac (CR) file loads and saves as CR; UTF-8 BOM preserved; UTF-16 loads as UTF-8.
 - Find/replace: plain, regex, case-sensitive, whole-word, Replace All as one undo step.
-- Word wrap toggle; font A−/A+; Day/Night; custom background color persists across restarts.
+- Word wrap toggle; font A−/A+; Day/Night persist across restarts.
 - Window menu lists documents; title bar shows `●` when modified.

@@ -20,8 +20,6 @@ impl Default for ThemeMode {
 pub struct Settings {
     pub font_size: f32,
     pub theme_mode: ThemeMode,
-    /// Custom editor background color (RGB, 0-255), if the user picked one.
-    pub custom_bg: Option<[u8; 3]>,
     pub wrap: bool,
     /// Show line numbers in a left gutter.
     #[serde(default)]
@@ -34,7 +32,6 @@ impl Default for Settings {
         Self {
             font_size: 15.0,
             theme_mode: ThemeMode::Day,
-            custom_bg: None,
             wrap: false,
             line_numbers: false,
             recents: Vec::new(),
@@ -110,18 +107,16 @@ pub struct Theme {
 impl Theme {
     pub fn resolve(settings: &Settings) -> Self {
         let dark = settings.theme_mode == ThemeMode::Night;
-        let bg = settings
-            .custom_bg
-            .map(|c| egui::Color32::from_rgb(c[0], c[1], c[2]))
-            .unwrap_or_else(|| {
-                if dark {
-                    // Kanpeki's night ink.
-                    egui::Color32::from_rgb(0x32, 0x36, 0x4a)
-                } else {
-                    // Kanpeki's day paper.
-                    egui::Color32::from_rgb(0x93, 0x99, 0xb7)
-                }
-            });
+        // Day and Night are the only palettes. (A custom background option
+        // used to sit on top of them; it made the two modes inconsistent and
+        // has been removed.)
+        let bg = if dark {
+            // Kanpeki's night ink.
+            egui::Color32::from_rgb(0x32, 0x36, 0x4a)
+        } else {
+            // Kanpeki's day paper.
+            egui::Color32::from_rgb(0x93, 0x99, 0xb7)
+        };
         // Pick readable text for whatever background we ended up with.
         let [r, g, b, _] = bg.to_normalized_gamma_f32();
         let lum = 0.299 * r + 0.587 * g + 0.114 * b;

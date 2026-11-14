@@ -766,24 +766,6 @@ impl DocWindow {
             c.settings.theme_mode = mode;
             c.settings.save();
         }
-
-        ui.separator();
-        if ui.button("Background Color…").clicked() {
-            let [r, g, b] = c.settings.custom_bg.unwrap_or([255, 255, 255]);
-            self.dialog = Some(Dialog::Color { r, g, b });
-            ui.close_menu();
-        }
-        if ui
-            .add_enabled(
-                c.settings.custom_bg.is_some(),
-                egui::Button::new("Default Background"),
-            )
-            .clicked()
-        {
-            c.settings.custom_bg = None;
-            c.settings.save();
-            ui.close_menu();
-        }
     }
 
     /// Window: the list of open documents (the current one marked).
@@ -1869,11 +1851,6 @@ impl DocWindow {
                 if let Some(Dialog::Find { error, .. }) = &mut self.dialog {
                     *error = Some(msg);
                 }
-            }
-            Action::ApplyColor(r, g, b) => {
-                self.dialog = None;
-                c.settings.custom_bg = Some([r, g, b]);
-                c.settings.save();
             }
         }
     }

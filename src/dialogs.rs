@@ -25,15 +25,6 @@ pub enum Dialog {
         /// The search field has not been focused yet.
         focus: bool,
     },
-    /// Custom background color picker.
-    Color {
-        /// Red.
-        r: u8,
-        /// Green.
-        g: u8,
-        /// Blue.
-        b: u8,
-    },
     /// About box.
     About,
 }
@@ -75,8 +66,6 @@ pub enum Action {
     Replace,
     /// Replace every match.
     ReplaceAll,
-    /// Apply a background color (r, g, b).
-    ApplyColor(u8, u8, u8),
 }
 
 /// Draw a dialog and report the user's action.
@@ -90,9 +79,6 @@ pub fn show(ctx: &egui::Context, dlg: &mut Dialog, theme: &Theme) -> Action {
         }),
         Dialog::Find { search, error, focus } => dialog_box(ctx, "find_dialog", theme, "Find & Replace", |ui| {
             find_body(ui, search, error, theme, focus)
-        }),
-        Dialog::Color { r, g, b } => dialog_box(ctx, "color_dialog", theme, "Background Color", |ui| {
-            color_body(ui, r, g, b, theme)
         }),
         Dialog::About => dialog_box(ctx, "about_dialog", theme, "About Kanpeki", |ui| {
             about_body(ui, theme);
@@ -468,41 +454,6 @@ fn on_accent(theme: &Theme) -> egui::Color32 {
         ThemeMode::Night => egui::Color32::from_rgb(18, 22, 30),
         ThemeMode::Day => egui::Color32::WHITE,
     }
-}
-
-fn color_body(ui: &mut egui::Ui, r: &mut u8, g: &mut u8, b: &mut u8, theme: &Theme) -> Action {
-    ui.label("Pick the background color of the editor:");
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        let swatch = egui::vec2(28.0, 24.0);
-        let (rect, _) = ui.allocate_exact_size(swatch, egui::Sense::hover());
-        ui.painter().rect_filled(rect, 3.0, egui::Color32::from_rgb(*r, *g, *b));
-        ui.painter().rect_stroke(
-            rect,
-            3.0,
-            egui::Stroke::new(1.0_f32, theme.border),
-        );
-    });
-    ui.add(egui::Slider::new(r, 0..=255).text("Red"));
-    ui.add(egui::Slider::new(g, 0..=255).text("Green"));
-    ui.add(egui::Slider::new(b, 0..=255).text("Blue"));
-    ui.add_space(6.0);
-    let act = ui
-        .allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 26.0),
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-            if ui.button("Cancel").clicked() {
-                return Action::Close;
-            }
-            if ui.button("Apply").clicked() {
-                return Action::ApplyColor(*r, *g, *b);
-            }
-            Action::None
-        })
-        .inner;
-    let _ = theme;
-    act
 }
 
 fn about_body(ui: &mut egui::Ui, _theme: &Theme) {
