@@ -45,6 +45,12 @@ impl Search {
     }
 
     /// All matches in the document, in order.
+    ///
+    /// The `regex` crate reports match positions as **byte** offsets, but
+    /// `Doc` (and therefore the editor's selection, caret, and replace API)
+    /// works in **character** indices. For files with non-ASCII text before a
+    /// match — em dashes, accented letters, and so on — the two differ, so
+    /// each match is translated before being returned.
     pub fn find_all(&self, doc: &Doc) -> Result<Vec<(usize, usize)>, String> {
         if self.query.is_empty() {
             return Ok(Vec::new());
@@ -52,8 +58,18 @@ impl Search {
         let re = self.compile()?;
         let text = doc.to_string();
         let mut out = Vec::new();
+
+        // Walk the matches in order and convert byte offsets to char indices
+        // incrementally. Each byte of `text` is scanned at most once, so this
+        // stays O(n) without allocating a byte→char table.
+        let mut byte_pos = 0usize;
+        let mut char_pos = 0usize;
         for m in re.find_iter(&text) {
-            out.push((m.start(), m.end()));
+            char_pos += text[byte_pos..m.start()].chars().count();
+            let char_len = text[m.start()..m.end()].chars().count();
+            out.push((char_pos, char_pos + char_len));
+            char_pos += char_len;
+            byte_pos = m.end();
         }
         Ok(out)
     }
@@ -80,5 +96,42 @@ impl Search {
             }
             Ok(Some(*all.last().unwrap()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::{Doc, Encoding, Eol};
+
+    #[test]
+    fn find_all_returns_char_indices_not_byte_offsets() {
+        // The em dash before the date is one character but three bytes, so
+        // byte and character offsets diverge as soon as it is scanned.
+        let mut doc = Doc::from_text(
+            "Arugula  —  2018-01-01  (p.45)\nBread  —  2018-01-01  (p.41)\n",
+            Eol::Unix,
+            Encoding::Utf8,
+            None,
+        );
+        let search = Search {
+            query: "2018-01".to_string(),
+            ..Search::default()
+        };
+
+        let matches = search.find_all(&doc).unwrap();
+        assert_eq!(matches.len(), 2);
+
+        for &(s, e) in &matches {
+            let matched: String = doc.rope.slice(s..e).into();
+            assert_eq!(matched, "2018-01", "match at ({s}, {e}) selected the wrong text");
+        }
+
+        // Search, selection, and replace all share the same indices, so
+        // replace-all must also land on the actual text (this would remove
+        // the wrong characters if byte offsets leaked through).
+        doc.replace_all(&matches, "2099-12");
+        assert!(doc.to_string().contains("Arugula  —  2099-12-01"));
+        assert!(doc.to_string().contains("Bread  —  2099-12-01"));
     }
 }

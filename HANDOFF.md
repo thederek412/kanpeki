@@ -105,6 +105,13 @@ Already fixed while writing Parts 2–5 (avoid re-introducing these):
   `platform_output.copied_text`), and `Cargo.toml` activates the `clipboard`
   feature on `egui-winit` so its internal paste detector accesses the OS
   clipboard via `arboard`.
+- **Find/replace uses character offsets.** The `regex` crate reports match
+  positions as UTF-8 **byte** offsets, but ropey (and Kanpeki's selection,
+  caret, and replace API) works in **character** indices. `search::find_all`
+  now converts each match incrementally, so an ASCII query such as `2018-01`
+  in a UTF-8 file with em dashes or accented letters before the match
+  (e.g. `Food & Wine - Recipe Index.txt`) selects and replaces the right text
+  instead of a range shifted by the multi-byte characters.
 
 Note (egui 0.27): `button_double_clicked` / `button_triple_clicked` are true on
 **release**, not on press. Kanpeki applies word/line selection on the release
